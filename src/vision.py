@@ -28,23 +28,23 @@ class FaceDetector:
             post_process=False
         )
 
-def extract_face(
+def extract_face_info(
     image_path: str,
     output_path: str = "cropped_face.jpg",
     padding: int = 15,
     min_confidence: float = 0.85,
     device: Optional[str] = None
-) -> str:
+) -> Dict[str, Any]:
     """
     Detect faces, select the largest valid human face, apply padding,
-    crop using Pillow, save high-quality JPEG, and return output file path.
+    crop using Pillow, save high-quality JPEG, and return detailed face metrics dictionary.
 
     :param image_path: Input image file path
     :param output_path: Destination file path for face crop
     :param padding: Padding pixels to add around face bounding box
     :param min_confidence: Minimum MTCNN detection probability score (default: 0.85)
     :param device: PyTorch device ('cpu' or 'cuda')
-    :return: Output file path string
+    :return: Dictionary containing output_path, box, width, height, aspect_ratio, confidence
     :raises ValueError: If image path is invalid or no valid face with confidence >= min_confidence is detected
     """
     if not os.path.exists(image_path):
@@ -87,7 +87,10 @@ def extract_face(
     right = min(width, int(best_box[2] + padding))
     bottom = min(height, int(best_box[3] + padding))
 
-    if right <= left or bottom <= top:
+    crop_w = right - left
+    crop_h = bottom - top
+
+    if crop_w <= 0 or crop_h <= 0:
         raise ValueError("No valid human face detected (invalid bounding box dimensions)")
 
     # 6. Crop face region using Pillow, save as high-quality JPEG
@@ -99,30 +102,48 @@ def extract_face(
         os.makedirs(out_dir, exist_ok=True)
 
     cropped_face.save(output_path, format="JPEG", quality=95)
-    return output_path
+    
+    aspect_ratio = round(crop_w / crop_h, 2) if crop_h > 0 else 1.0
+
+    return {
+        "output_path": output_path,
+        "box": [left, top, right, bottom],
+        "width": crop_w,
+        "height": crop_h,
+        "aspect_ratio": aspect_ratio,
+        "confidence": float(best_prob)
+    }
+
+def extract_face(
+    image_path: str,
+    output_path: str = "cropped_face.jpg",
+    padding: int = 15,
+    min_confidence: float = 0.85,
+    device: Optional[str] = None
+) -> str:
+    """Wrapper returning output_path string."""
+    res = extract_face_info(image_path, output_path, padding, min_confidence, device)
+    return res["output_path"]
 
 if __name__ == "__main__":
     print("[F.I.B.E.R. Vision] Running standalone face extraction test...")
 
-    # Create a synthetic sample image with a drawn box for testing if no argument passed
     sample_img_path = "sample_test.jpg"
     out_crop_path = "output_cropped_face.jpg"
 
     if len(sys.argv) > 1:
         input_file = sys.argv[1]
     else:
-        # Create a 300x300 sample image
         sample_img = Image.new("RGB", (300, 300), color=(220, 220, 220))
         sample_img.save(sample_img_path)
         input_file = sample_img_path
 
     try:
-        result_path = extract_face(input_file, output_path=out_crop_path, padding=15)
-        print(f"[+] Face extraction succeeded: {result_path}")
+        info = extract_face_info(input_file, output_path=out_crop_path, padding=15)
+        print(f"[+] Face extraction succeeded: {info}")
     except ValueError as err:
         print(f"[!] Expected result / face detection error: {err}")
     finally:
-        # Clean up temporary test files
         if os.path.exists(sample_img_path) and len(sys.argv) <= 1:
             os.remove(sample_img_path)
         if os.path.exists(out_crop_path):

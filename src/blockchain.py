@@ -102,7 +102,7 @@ class BlockchainClient:
     def anchor(self, evidence_hash_hex: str, source_url: str) -> Dict[str, Any]:
         """
         Build, sign, and broadcast anchorEvidence transaction to Arbitrum Sepolia.
-        Waits for transaction receipt and returns receipt details & Arbiscan link.
+        Includes dynamic gas estimation & fallback for testnet gas price spikes.
 
         :param evidence_hash_hex: Hex string of evidence hash (with or without '0x')
         :param source_url: Source URL or metadata URI string
@@ -116,14 +116,27 @@ class BlockchainClient:
         evidence_bytes32 = bytes.fromhex(clean_hex)
 
         nonce = self.w3.eth.get_transaction_count(self.account.address)
-        gas_price = self.w3.eth.gas_price
+
+        # Dynamic gas estimation with fallback buffer
+        try:
+            estimated_gas = self.contract.functions.anchorEvidence(
+                evidence_bytes32, source_url
+            ).estimate_gas({'from': self.account.address})
+            gas_limit = int(estimated_gas * 1.25)
+        except Exception:
+            gas_limit = 350000
+
+        try:
+            gas_price = int(self.w3.eth.gas_price * 1.1)
+        except Exception:
+            gas_price = self.w3.to_wei(0.1, 'gwei')
 
         tx = self.contract.functions.anchorEvidence(
             evidence_bytes32,
             source_url
         ).build_transaction({
             'chainId': self.get_chain_id(),
-            'gas': 300000,
+            'gas': gas_limit,
             'gasPrice': gas_price,
             'nonce': nonce,
             'from': self.account.address
@@ -143,6 +156,9 @@ class BlockchainClient:
         receipt_tx_hash = receipt.transactionHash.hex()
         if not receipt_tx_hash.startswith("0x"):
             receipt_tx_hash = "0x" + receipt_tx_hash
+
+        if receipt.status == 0:
+            raise RuntimeError(f"Transaction reverted on-chain! Tx Hash: {receipt_tx_hash}")
 
         explorer_url = f"{DEFAULT_EXPLORER_URL}/tx/{receipt_tx_hash}"
 
