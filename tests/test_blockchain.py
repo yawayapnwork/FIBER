@@ -22,5 +22,10 @@ class TestArbitrumFiberClient(unittest.TestCase):
         client = ArbitrumFiberClient(rpc_url="https://sepolia-rollup.arbitrum.io/rpc")
         self.assertTrue(client.is_connected())
 
+    def test_verify_evidence_no_contract_raises(self):
+        client = ArbitrumFiberClient(rpc_url="https://sepolia-rollup.arbitrum.io/rpc")
+        with self.assertRaises(ValueError):
+            client.verify_evidence(b"\x00" * 32)
+
 if __name__ == "__main__":
     unittest.main()

@@ -10,48 +10,60 @@ from eth_account import Account
 
 DEFAULT_ARBITRUM_SEPOLIA_RPC = "https://sepolia-rollup.arbitrum.io/rpc"
 
-# ABI for FiberRegistry contract
+# Updated ABI matching FiberRegistry.sol (anchorEvidence, verifyEvidence)
 FIBER_REGISTRY_ABI = [
     {
         "inputs": [
-            {"internalType": "bytes32", "name": "faceHash", "type": "bytes32"},
-            {"internalType": "string", "name": "metadataUri", "type": "string"}
+            {"internalType": "bytes32", "name": "_evidenceHash", "type": "bytes32"},
+            {"internalType": "string", "name": "_sourceUrl", "type": "string"}
         ],
-        "name": "registerRecord",
+        "name": "anchorEvidence",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
     },
     {
-        "inputs": [
-            {"internalType": "bytes32", "name": "faceHash", "type": "bytes32"},
-            {"internalType": "uint8", "name": "newStatus", "type": "uint8"}
-        ],
-        "name": "updateStatus",
-        "outputs": [],
-        "stateMutability": "nonpayable",
-        "type": "function"
-    },
-    {
-        "inputs": [{"internalType": "bytes32", "name": "faceHash", "type": "bytes32"}],
-        "name": "getRecord",
+        "inputs": [{"internalType": "bytes32", "name": "_evidenceHash", "type": "bytes32"}],
+        "name": "verifyEvidence",
         "outputs": [
-            {"internalType": "bytes32", "name": "hashVal", "type": "bytes32"},
-            {"internalType": "string", "name": "metadataUri", "type": "string"},
-            {"internalType": "uint256", "name": "timestamp", "type": "uint256"},
-            {"internalType": "address", "name": "owner", "type": "address"},
-            {"internalType": "uint8", "name": "status", "type": "uint8"},
-            {"internalType": "bool", "name": "exists", "type": "bool"}
+            {"internalType": "bool", "name": "exists", "type": "bool"},
+            {
+                "components": [
+                    {"internalType": "bytes32", "name": "evidenceHash", "type": "bytes32"},
+                    {"internalType": "string", "name": "sourceUrl", "type": "string"},
+                    {"internalType": "uint256", "name": "timestamp", "type": "uint256"},
+                    {"internalType": "address", "name": "registeredBy", "type": "address"}
+                ],
+                "internalType": "struct FiberRegistry.Evidence",
+                "name": "record",
+                "type": "tuple"
+            }
         ],
         "stateMutability": "view",
         "type": "function"
     },
     {
-        "inputs": [],
-        "name": "totalRecords",
-        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "inputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
+        "name": "records",
+        "outputs": [
+            {"internalType": "bytes32", "name": "evidenceHash", "type": "bytes32"},
+            {"internalType": "string", "name": "sourceUrl", "type": "string"},
+            {"internalType": "uint256", "name": "timestamp", "type": "uint256"},
+            {"internalType": "address", "name": "registeredBy", "type": "address"}
+        ],
         "stateMutability": "view",
         "type": "function"
+    },
+    {
+        "anonymous": False,
+        "inputs": [
+            {"indexed": True, "internalType": "bytes32", "name": "evidenceHash", "type": "bytes32"},
+            {"indexed": False, "internalType": "string", "name": "sourceUrl", "type": "string"},
+            {"indexed": False, "internalType": "uint256", "name": "timestamp", "type": "uint256"},
+            {"indexed": True, "internalType": "address", "name": "registrar", "type": "address"}
+        ],
+        "name": "EvidenceAnchored",
+        "type": "event"
     }
 ]
 
@@ -81,9 +93,9 @@ class ArbitrumFiberClient:
         """Get network Chain ID (Arbitrum Sepolia is 421614)."""
         return self.w3.eth.chain_id
 
-    def register_record_onchain(self, face_hash: bytes, metadata_uri: str) -> Dict[str, Any]:
+    def anchor_evidence(self, evidence_hash: bytes, source_url: str) -> Dict[str, Any]:
         """
-        Send a transaction to register a face record on Arbitrum Sepolia.
+        Send transaction to anchor evidence on Arbitrum Sepolia.
         """
         if not self.account or not self.contract:
             raise ValueError("Private key and valid contract address are required for on-chain transactions.")
@@ -91,9 +103,9 @@ class ArbitrumFiberClient:
         nonce = self.w3.eth.get_transaction_count(self.account.address)
         gas_price = self.w3.eth.gas_price
 
-        tx = self.contract.functions.registerRecord(
-            face_hash,
-            metadata_uri
+        tx = self.contract.functions.anchorEvidence(
+            evidence_hash,
+            source_url
         ).build_transaction({
             'chainId': self.get_chain_id(),
             'gas': 300000,
@@ -111,19 +123,22 @@ class ArbitrumFiberClient:
             "from": self.account.address
         }
 
-    def fetch_record(self, face_hash: bytes) -> Dict[str, Any]:
+    def verify_evidence(self, evidence_hash: bytes) -> Dict[str, Any]:
         """
-        Read face record from FiberRegistry contract.
+        Query evidence record from FiberRegistry contract.
         """
         if not self.contract:
             raise ValueError("Valid contract address is required to query state.")
 
-        hash_val, uri, ts, owner, status, exists = self.contract.functions.getRecord(face_hash).call()
+        exists, record = self.contract.functions.verifyEvidence(evidence_hash).call()
         return {
-            "face_hash": hash_val.hex(),
-            "metadata_uri": uri,
-            "timestamp": ts,
-            "owner": owner,
-            "status": status,
-            "exists": exists
+            "exists": exists,
+            "evidence_hash": record[0].hex() if isinstance(record[0], bytes) else record[0],
+            "source_url": record[1],
+            "timestamp": record[2],
+            "registered_by": record[3]
         }
+
+    # Aliases for backward compatibility
+    register_record_onchain = anchor_evidence
+    fetch_record = verify_evidence

@@ -30,14 +30,14 @@ def main():
     search_parser = subparsers.add_parser("search", help="Perform reverse visual search using RapidAPI Copyseeker")
     search_parser.add_argument("image_path", type=str, help="Path to input image file")
 
-    # Command: register
-    register_parser = subparsers.add_parser("register", help="Scan face, search matches, and record on Arbitrum Sepolia")
-    register_parser.add_argument("image_path", type=str, help="Path to input image file")
-    register_parser.add_argument("--uri", type=str, default="ipfs://QmFiberMetadataPlaceholder", help="Metadata URI pointer")
+    # Command: anchor / register
+    anchor_parser = subparsers.add_parser("anchor", help="Scan face, search matches, and anchor evidence on Arbitrum Sepolia")
+    anchor_parser.add_argument("image_path", type=str, help="Path to input image file")
+    anchor_parser.add_argument("--url", type=str, default="https://fiber.enforcement/match", help="Evidence source URL or metadata link")
 
-    # Command: status
-    status_parser = subparsers.add_parser("status", help="Query face record status from Arbitrum Sepolia")
-    status_parser.add_argument("face_hash", type=str, help="Bytes32 hex hash of face record")
+    # Command: verify / status
+    verify_parser = subparsers.add_parser("verify", help="Query evidence record status from Arbitrum Sepolia")
+    verify_parser.add_argument("evidence_hash", type=str, help="Bytes32 hex evidence hash")
 
     args = parser.parse_args()
 
@@ -61,30 +61,33 @@ def main():
         results = search_engine.search_by_image(args.image_path)
         print(f"[+] Search Results: {results}")
 
-    elif args.command == "register":
-        print(f"[F.I.B.E.R. Pipeline] Processing registration for: {args.image_path}")
+    elif args.command == "anchor":
+        print(f"[F.I.B.E.R. Pipeline] Anchoring evidence for: {args.image_path}")
         detector = FaceDetector()
         faces = detector.detect_and_crop(args.image_path)
         if not faces:
             print("[-] No valid faces detected.")
             sys.exit(1)
 
-        face_hash = FiberCrypto.hash_pil_image(faces[0]["crop_pil"])
-        print(f"[+] Face Keccak-256 Hash: 0x{face_hash.hex()}")
+        evidence_hash = FiberCrypto.hash_pil_image(faces[0]["crop_pil"])
+        print(f"[+] Evidence Keccak-256 Hash: 0x{evidence_hash.hex()}")
 
         client = ArbitrumFiberClient()
         if not client.is_connected():
             print("[-] Error connecting to Arbitrum Sepolia RPC.")
             sys.exit(1)
 
-        res = client.register_record_onchain(face_hash, args.uri)
-        print(f"[+] Transaction submitted to Arbitrum Sepolia: {res['tx_hash']}")
+        res = client.anchor_evidence(evidence_hash, args.url)
+        print(f"[+] Evidence transaction submitted to Arbitrum Sepolia: {res['tx_hash']}")
 
-    elif args.command == "status":
+    elif args.command == "verify":
         client = ArbitrumFiberClient()
-        face_hash_bytes = bytes.fromhex(args.face_hash.replace("0x", ""))
-        rec = client.fetch_record(face_hash_bytes)
-        print(f"[+] Record Status: {rec}")
+        hash_bytes = bytes.fromhex(args.evidence_hash.replace("0x", ""))
+        rec = client.verify_evidence(hash_bytes)
+        print(f"[+] Evidence Record: Exists={rec['exists']}")
+        print(f"    Source URL: {rec['source_url']}")
+        print(f"    Timestamp:  {rec['timestamp']}")
+        print(f"    Registrar:  {rec['registered_by']}")
 
 if __name__ == "__main__":
     main()

@@ -3,110 +3,65 @@ pragma solidity ^0.8.20;
 
 /**
  * @title FiberRegistry
- * @dev Facial Identification & Blockchain Enforcement Runtime Registry on Arbitrum Sepolia
+ * @dev Gas-optimized registry for Facial Identification & Blockchain Enforcement Runtime (F.I.B.E.R.) on Arbitrum Sepolia
  */
 contract FiberRegistry {
-    enum EnforcementStatus { Registered, UnderReview, ViolationConfirmed, Enforced }
+    // Custom errors for gas optimization
+    error EvidenceAlreadyAnchored(bytes32 evidenceHash);
+    error InvalidEvidenceHash();
 
-    struct FacialRecord {
-        bytes32 faceHash;         // Cryptographic SHA-256 / Keccak-256 hash of facial features
-        string metadataUri;       // Pointer to match metadata / reverse search report
-        uint256 timestamp;        // Block timestamp of registration
-        address owner;            // Address registering the record
-        EnforcementStatus status; // Current enforcement status
-        bool exists;              // Flag checking record existence
+    // Struct representing anchored facial evidence
+    struct Evidence {
+        bytes32 evidenceHash;   // SHA-256 or Keccak-256 hash of facial feature / crop
+        string sourceUrl;       // Reverse visual search source match URL or metadata link
+        uint256 timestamp;      // Block timestamp when evidence was anchored
+        address registeredBy;   // Address of the account registering the evidence
     }
 
-    // Mapping from faceHash to FacialRecord
-    mapping(bytes32 => FacialRecord) public records;
+    // Mapping from evidence hash to Evidence record
+    mapping(bytes32 => Evidence) public records;
 
-    // Array of all registered face hashes
-    bytes32[] public allFaceHashes;
-
-    // Events
-    event RecordRegistered(
-        bytes32 indexed faceHash,
-        address indexed owner,
-        string metadataUri,
-        uint256 timestamp
+    // Event emitted when new evidence is anchored on-chain
+    event EvidenceAnchored(
+        bytes32 indexed evidenceHash,
+        string sourceUrl,
+        uint256 timestamp,
+        address indexed registrar
     );
-    
-    event StatusUpdated(
-        bytes32 indexed faceHash,
-        EnforcementStatus newStatus,
-        uint256 timestamp
-    );
-
-    event EnforcementTriggered(
-        bytes32 indexed faceHash,
-        address indexed enforcer,
-        uint256 timestamp
-    );
-
-    modifier onlyRecordOwner(bytes32 faceHash) {
-        require(records[faceHash].exists, "FiberRegistry: Record does not exist");
-        require(records[faceHash].owner == msg.sender, "FiberRegistry: Not record owner");
-        _;
-    }
 
     /**
-     * @notice Register a new facial hash record on-chain
-     * @param faceHash Keccak-256 / SHA-256 digest of facial features
-     * @param metadataUri URI pointing to reverse visual search findings or metadata
+     * @notice Anchor a facial identification evidence record on-chain
+     * @dev Reverts with InvalidEvidenceHash if zero hash, or EvidenceAlreadyAnchored if already exists
+     * @param _evidenceHash Keccak-256 or SHA-256 digest of facial identification
+     * @param _sourceUrl URL / URI of reverse search match or evidence payload
      */
-    function registerRecord(bytes32 faceHash, string memory metadataUri) external {
-        require(faceHash != bytes32(0), "FiberRegistry: Invalid face hash");
-        require(!records[faceHash].exists, "FiberRegistry: Face record already exists");
+    function anchorEvidence(bytes32 _evidenceHash, string calldata _sourceUrl) external {
+        if (_evidenceHash == bytes32(0)) {
+            revert InvalidEvidenceHash();
+        }
+        if (records[_evidenceHash].timestamp != 0) {
+            revert EvidenceAlreadyAnchored(_evidenceHash);
+        }
 
-        records[faceHash] = FacialRecord({
-            faceHash: faceHash,
-            metadataUri: metadataUri,
+        records[_evidenceHash] = Evidence({
+            evidenceHash: _evidenceHash,
+            sourceUrl: _sourceUrl,
             timestamp: block.timestamp,
-            owner: msg.sender,
-            status: EnforcementStatus.Registered,
-            exists: true
+            registeredBy: msg.sender
         });
 
-        allFaceHashes.push(faceHash);
-
-        emit RecordRegistered(faceHash, msg.sender, metadataUri, block.timestamp);
+        emit EvidenceAnchored(_evidenceHash, _sourceUrl, block.timestamp, msg.sender);
     }
 
     /**
-     * @notice Update enforcement status of a face record
-     * @param faceHash Hash of the facial record
-     * @param newStatus New enforcement status enum
+     * @notice Verify whether an evidence hash exists on-chain and retrieve its record
+     * @param _evidenceHash Evidence hash to query
+     * @return exists Boolean indicating whether record exists
+     * @return record The Evidence struct stored on-chain
      */
-    function updateStatus(bytes32 faceHash, EnforcementStatus newStatus) external onlyRecordOwner(faceHash) {
-        records[faceHash].status = newStatus;
-        emit StatusUpdated(faceHash, newStatus, block.timestamp);
-        
-        if (newStatus == EnforcementStatus.Enforced) {
-            emit EnforcementTriggered(faceHash, msg.sender, block.timestamp);
-        }
-    }
-
-    /**
-     * @notice Retrieve details of a facial record
-     * @param faceHash Hash of the facial record
-     */
-    function getRecord(bytes32 faceHash) external view returns (
-        bytes32 hashVal,
-        string memory metadataUri,
-        uint256 timestamp,
-        address owner,
-        EnforcementStatus status,
-        bool exists
-    ) {
-        require(records[faceHash].exists, "FiberRegistry: Record does not exist");
-        FacialRecord memory rec = records[faceHash];
-        return (rec.faceHash, rec.metadataUri, rec.timestamp, rec.owner, rec.status, rec.exists);
-    }
-
-    /**
-     * @notice Total number of registered face records
-     */
-    function totalRecords() external view returns (uint256) {
-        return allFaceHashes.length;
+    function verifyEvidence(bytes32 _evidenceHash) external view returns (bool exists, Evidence memory record) {
+        Evidence memory rec = records[_evidenceHash];
+        exists = (rec.timestamp != 0);
+        record = rec;
     }
 }
