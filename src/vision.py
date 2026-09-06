@@ -1,86 +1,129 @@
 """
 F.I.B.E.R. Vision Module
 Pure Python facial identification pipeline using Pillow (PIL) and facenet-pytorch (MTCNN).
-STRICT CONSTRAINT: No OpenCV (cv2) or libGL dependencies.
+
+STRICT CONSTRAINT: DO NOT import `cv2` or use OpenCV anywhere in this file or project.
 """
 
-from typing import List, Optional, Dict, Any, Union
-from PIL import Image
+import os
+import sys
+from typing import List, Dict, Any, Optional, Tuple
+from PIL import Image, ImageOps
 import torch
 from facenet_pytorch import MTCNN
-import io
 
 class FaceDetector:
-    def __init__(self, keep_all: bool = True, device: Optional[str] = None):
-        """
-        Initialize MTCNN face detector with PyTorch and PIL.
-        """
+    def __init__(self, device: Optional[str] = None):
+        """Initialize MTCNN face detector using PyTorch and PIL."""
         if device is None:
             self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
         else:
             self.device = device
-            
-        # Initialize MTCNN without cv2 dependence
+
+        # Initialize MTCNN without any OpenCV dependence
         self.mtcnn = MTCNN(
-            keep_all=keep_all,
+            keep_all=True,
             select_largest=False,
             device=self.device,
             post_process=False
         )
 
-    def detect_and_crop(
-        self, image_input: Union[str, Image.Image]
-    ) -> List[Dict[str, Any]]:
-        """
-        Detect faces in an image and return facial bounding boxes, confidence scores,
-        and cropped PIL Image objects.
-        
-        :param image_input: Path string or PIL Image object
-        :return: List of dicts containing 'box', 'prob', and 'crop_pil'
-        """
-        if isinstance(image_input, str):
-            img = Image.open(image_input).convert('RGB')
-        elif isinstance(image_input, Image.Image):
-            img = image_input.convert('RGB')
-        else:
-            raise ValueError("Input must be a file path string or PIL Image object.")
+def extract_face(
+    image_path: str,
+    output_path: str = "cropped_face.jpg",
+    padding: int = 15,
+    min_confidence: float = 0.85,
+    device: Optional[str] = None
+) -> str:
+    """
+    Detect faces, select the largest valid human face, apply padding,
+    crop using Pillow, save high-quality JPEG, and return output file path.
 
-        # Detect boxes and probabilities using MTCNN
-        boxes, probs = self.mtcnn.detect(img)
-        
-        results = []
-        if boxes is not None and len(boxes) > 0:
-            for box, prob in zip(boxes, probs):
-                if prob is None or prob < 0.85:
-                    continue
-                
-                # Box coordinates: [left, top, right, bottom]
-                left, top, right, bottom = [int(coord) for coord in box]
-                
-                # Clamp coordinates to image boundaries
-                width, height = img.size
-                left = max(0, left)
-                top = max(0, top)
-                right = min(width, right)
-                bottom = min(height, bottom)
+    :param image_path: Input image file path
+    :param output_path: Destination file path for face crop
+    :param padding: Padding pixels to add around face bounding box
+    :param min_confidence: Minimum MTCNN detection probability score (default: 0.85)
+    :param device: PyTorch device ('cpu' or 'cuda')
+    :return: Output file path string
+    :raises ValueError: If image path is invalid or no valid face with confidence >= min_confidence is detected
+    """
+    if not os.path.exists(image_path):
+        raise ValueError(f"Input image path does not exist: {image_path}")
 
-                if right <= left or bottom <= top:
-                    continue
+    # 1. Open image with Pillow, handle EXIF rotation, convert to RGB
+    try:
+        img = Image.open(image_path)
+        img = ImageOps.exif_transpose(img).convert("RGB")
+    except Exception as e:
+        raise ValueError(f"Failed to open image file '{image_path}': {e}")
 
-                # Crop face using PIL crop (no cv2)
-                cropped_img = img.crop((left, top, right, bottom))
+    width, height = img.size
 
-                results.append({
-                    "box": [left, top, right, bottom],
-                    "prob": float(prob),
-                    "crop_pil": cropped_img
-                })
+    # 2. Use MTCNN to detect bounding boxes and probability scores
+    detector = FaceDetector(device=device)
+    boxes, probs = detector.mtcnn.detect(img)
 
-        return results
+    # 3. If no face is found or probability is below min_confidence, raise descriptive error
+    if boxes is None or probs is None or len(boxes) == 0:
+        raise ValueError("No valid human face detected")
 
-    @staticmethod
-    def pil_to_bytes(img: Image.Image, format: str = "JPEG") -> bytes:
-        """Convert a PIL Image to raw bytes."""
-        buffer = io.BytesIO()
-        img.save(buffer, format=format)
-        return buffer.getvalue()
+    valid_faces: List[Tuple[List[float], float, float]] = []
+    for box, prob in zip(boxes, probs):
+        if prob is not None and prob >= min_confidence:
+            l, t, r, b = box
+            area = max(0.0, r - l) * max(0.0, b - t)
+            valid_faces.append((box, prob, area))
+
+    if not valid_faces:
+        raise ValueError("No valid human face detected")
+
+    # 4. Select the largest face by bounding box area
+    valid_faces.sort(key=lambda x: x[2], reverse=True)
+    best_box, best_prob, _ = valid_faces[0]
+
+    # 5. Add padding pixels around coordinates while bounding within image dimensions
+    left = max(0, int(best_box[0] - padding))
+    top = max(0, int(best_box[1] - padding))
+    right = min(width, int(best_box[2] + padding))
+    bottom = min(height, int(best_box[3] + padding))
+
+    if right <= left or bottom <= top:
+        raise ValueError("No valid human face detected (invalid bounding box dimensions)")
+
+    # 6. Crop face region using Pillow, save as high-quality JPEG
+    cropped_face = img.crop((left, top, right, bottom))
+
+    # Ensure parent output directory exists
+    out_dir = os.path.dirname(os.path.abspath(output_path))
+    if out_dir and not os.path.exists(out_dir):
+        os.makedirs(out_dir, exist_ok=True)
+
+    cropped_face.save(output_path, format="JPEG", quality=95)
+    return output_path
+
+if __name__ == "__main__":
+    print("[F.I.B.E.R. Vision] Running standalone face extraction test...")
+
+    # Create a synthetic sample image with a drawn box for testing if no argument passed
+    sample_img_path = "sample_test.jpg"
+    out_crop_path = "output_cropped_face.jpg"
+
+    if len(sys.argv) > 1:
+        input_file = sys.argv[1]
+    else:
+        # Create a 300x300 sample image
+        sample_img = Image.new("RGB", (300, 300), color=(220, 220, 220))
+        sample_img.save(sample_img_path)
+        input_file = sample_img_path
+
+    try:
+        result_path = extract_face(input_file, output_path=out_crop_path, padding=15)
+        print(f"[+] Face extraction succeeded: {result_path}")
+    except ValueError as err:
+        print(f"[!] Expected result / face detection error: {err}")
+    finally:
+        # Clean up temporary test files
+        if os.path.exists(sample_img_path) and len(sys.argv) <= 1:
+            os.remove(sample_img_path)
+        if os.path.exists(out_crop_path):
+            os.remove(out_crop_path)
