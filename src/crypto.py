@@ -81,3 +81,20 @@ class FiberCrypto:
             "s": signed_message.s.hex() if hasattr(signed_message.s, 'hex') else hex(signed_message.s),
             "v": signed_message.v
         }
+
+    @staticmethod
+    def create_bitemporal_manifest(source_url: str, author: str, discovered_at: int, published_at: int) -> dict:
+        """
+        Generate a Bi-Temporal Evidence Manifest tracking both discovery and publication time
+        to mitigate search crawler indexing latency.
+        """
+        indexing_lag_seconds = discovered_at - published_at
+        if indexing_lag_seconds < 0:
+            indexing_lag_seconds = 0
+            
+        return {
+            "url": source_url,
+            "author": author,
+            "discovered_at": discovered_at,
+            "indexing_lag_seconds": indexing_lag_seconds
+        }

@@ -16,6 +16,7 @@ contract FiberMerkleRegistry {
         string sourceUrl;       // Metadata URI or reverse search source match URL
         uint256 timestamp;      // Block timestamp when anchored
         address registrar;      // Address of the account registering the root
+        bool indexingDelayBypass; // Flag for manual URL override due to search indexing lag
     }
 
     // Mapping from Merkle root to its anchoring Record
@@ -26,7 +27,8 @@ contract FiberMerkleRegistry {
         bytes32 indexed merkleRoot,
         string sourceUrl,
         uint256 timestamp,
-        address indexed registrar
+        address indexed registrar,
+        bool indexingDelayBypass
     );
 
     /**
@@ -34,8 +36,9 @@ contract FiberMerkleRegistry {
      * @dev Reverts with InvalidMerkleRoot if zero hash, or RootAlreadyAnchored if already exists
      * @param _merkleRoot SHA-256 digest of the 3-leaf Merkle Root
      * @param _sourceUrl URL / URI of reverse search match or evidence payload
+     * @param _bypass Flag indicating if the indexing delay bypass was manually invoked
      */
-    function anchorRoot(bytes32 _merkleRoot, string calldata _sourceUrl) external {
+    function anchorRoot(bytes32 _merkleRoot, string calldata _sourceUrl, bool _bypass) external {
         if (_merkleRoot == bytes32(0)) {
             revert InvalidMerkleRoot();
         }
@@ -47,10 +50,11 @@ contract FiberMerkleRegistry {
             merkleRoot: _merkleRoot,
             sourceUrl: _sourceUrl,
             timestamp: block.timestamp,
-            registrar: msg.sender
+            registrar: msg.sender,
+            indexingDelayBypass: _bypass
         });
 
-        emit MerkleRootAnchored(_merkleRoot, _sourceUrl, block.timestamp, msg.sender);
+        emit MerkleRootAnchored(_merkleRoot, _sourceUrl, block.timestamp, msg.sender, _bypass);
     }
 
     /**

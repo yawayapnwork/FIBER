@@ -8,6 +8,7 @@ import sys
 import os
 import argparse
 import datetime
+import time
 import io
 import copy
 
@@ -31,6 +32,7 @@ from src.matcher import extract_embedding
 from src.search import CopyseekerSearchEngine, NoMatchesFoundError, CopyseekerAPIError, CopyseekerTimeoutError, CopyseekerRateLimitError
 from src.blockchain import BlockchainClient
 from src.merkle import EvidenceMerkleTree
+from src.crypto import FiberCrypto
 
 console = Console()
 
@@ -65,10 +67,10 @@ def parse_author(url: str, title: str) -> str:
     """Extract author or title for metadata"""
     return title
 
-def run_scan_pipeline(image_path: str, is_tamper_test: bool = False):
+def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url: str | None = None):
     """
     Run full 6-step enforcement pipeline with Rich terminal UI.
-    If is_tamper_test is True, modifies the data post-anchor to prove zero-trust immutability.
+    Supports bypass of indexing latency via manual_url.
     """
     print_banner()
 
@@ -92,18 +94,26 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False):
     console.print(f"[bold green][+] Step 1 Complete:[/bold green] High-confidence facial embedding extracted.")
 
     # STEP 2: Reverse Visual Search
-    with console.status("[bold green]Step 2/6: Querying Non-Google Reverse Visual Search Index...", spinner="earth"):
-        try:
-            search_engine = CopyseekerSearchEngine()
-            search_res = search_engine.search(image_path)
-        except NoMatchesFoundError as e:
-            console.print(f"[bold red][X] Step 2 Zero Matches:[/bold red] {e}")
-            sys.exit(1)
-        except Exception as e:
-            console.print(f"[bold red][X] Step 2 API Error:[/bold red] {e}")
-            sys.exit(1)
-
-    console.print(f"[bold green][+] Step 2 Complete:[/bold green] Visual match discovered: [blue link={search_res['source_url']}]{search_res['source_url']}[/blue link]")
+    if manual_url:
+        console.print(f"[bold yellow][!] Step 2 Bypassed:[/bold yellow] Using manual URL override due to search indexing latency.")
+        search_res = {
+            "source_url": manual_url,
+            "page_title": "Manual Override Post",
+            "matched_image_url": manual_url,
+            "discovered_at": int(time.time())
+        }
+    else:
+        with console.status("[bold green]Step 2/6: Querying Non-Google Reverse Visual Search Index...", spinner="earth"):
+            try:
+                search_engine = CopyseekerSearchEngine()
+                search_res = search_engine.search(image_path)
+            except NoMatchesFoundError as e:
+                console.print(f"[bold red][X] Step 2 Zero Matches:[/bold red] {e}")
+                sys.exit(1)
+            except Exception as e:
+                console.print(f"[bold red][X] Step 2 API Error:[/bold red] {e}")
+                sys.exit(1)
+        console.print(f"[bold green][+] Step 2 Complete:[/bold green] Visual match discovered: [blue link={search_res['source_url']}]{search_res['source_url']}[/blue link]")
 
     # STEP 3: Bidirectional Face Verification
     with console.status("[bold green]Step 3/6: Running Bidirectional Face Verification (Cosine Similarity)...", spinner="bouncingBar"):
@@ -128,15 +138,25 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False):
 
     # STEP 4: Merkle Tree Construction
     with console.status("[bold green]Step 4/6: Constructing 3-Leaf Merkle Tree Commitment...", spinner="moon"):
-        metadata = {
-            "url": search_res["source_url"],
-            "timestamp": search_res["discovered_at"],
-            "author": parse_author(search_res["source_url"], search_res["page_title"])
-        }
+        # Use Bi-Temporal tracking
+        if manual_url:
+            published_at = search_res["discovered_at"] - 300 # Mock 5 mins ago for unindexed post
+            author = "Manual Override Verify"
+        else:
+            published_at = search_res["discovered_at"] - 3600 # Assume ~1 hour ago for organically indexed posts
+            author = parse_author(search_res["source_url"], search_res["page_title"])
+            
+        metadata = FiberCrypto.create_bitemporal_manifest(
+            source_url=search_res["source_url"],
+            author=author,
+            discovered_at=search_res["discovered_at"],
+            published_at=published_at
+        )
+
         merkle_res = EvidenceMerkleTree.build_tree(input_vector_bytes, candidate_vector_bytes, metadata)
         merkle_root = merkle_res["merkle_root"]
 
-    console.print(f"[bold green][+] Step 4 Complete:[/bold green] Merkle Root Generated: [cyan]{merkle_root}[/cyan]")
+    console.print(f"[bold green][+] Step 4 Complete:[/bold green] Bi-Temporal Merkle Root Generated: [cyan]{merkle_root}[/cyan]")
 
     # TAMPER TEST MODE BRANCH
     if is_tamper_test:
@@ -187,7 +207,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False):
 
     with console.status("[bold green]Step 5/6: Anchoring Merkle Root to FiberMerkleRegistry on Arbitrum Sepolia...", spinner="dots2"):
         try:
-            anchor_res = client.anchor(merkle_root, search_res["source_url"])
+            anchor_res = client.anchor(merkle_root, search_res["source_url"], bypass_flag=bool(manual_url))
         except ValueError as e:
             console.print(f"[bold red][X] Step 5 Configuration Error:[/bold red] {e}")
             sys.exit(2)
@@ -228,6 +248,11 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False):
     table.add_row("Biometric Root (Leaf A)", merkle_res["leaves"]["leaf_a"])
     table.add_row("Visual Asset Root (Leaf B)", merkle_res["leaves"]["leaf_b"])
     table.add_row("Context Root (Leaf C)", merkle_res["leaves"]["leaf_c"])
+    table.add_row("Indexing Lag (Seconds)", str(metadata["indexing_lag_seconds"]))
+    
+    if verify_res.get("indexing_delay_bypass"):
+        table.add_row("Indexing Delay Bypass", "[bold yellow]TRUE (Manual Verification)[/bold yellow]")
+        
     table.add_row("Arbitrum Tx Hash", f"{anchor_res['tx_hash']} (Block #{anchor_res['block_number']})")
     table.add_row("Arbiscan Explorer Link", f"[blue link={anchor_res['explorer_url']}]{anchor_res['explorer_url']}[/blue link]")
     table.add_row("Registered By (Registrar)", verify_res["registered_by"])
@@ -235,6 +260,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False):
     console.print(table)
     console.print(Panel("[bold green]ENFORCEMENT PIPELINE COMPLETED SUCCESSFULLY (Exit Code 0)[/bold green]", border_style="green", expand=False))
     sys.exit(0)
+
 
 def run_verify_command(merkle_root: str):
     """
@@ -261,6 +287,10 @@ def run_verify_command(merkle_root: str):
         ts_str = datetime.datetime.fromtimestamp(res['timestamp'], tz=datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
         table.add_row("Verification Status", "[bold green]CONFIRMED (EXISTS)[/bold green]")
         table.add_row("Merkle Root", res["merkle_root"])
+        
+        if res.get("indexing_delay_bypass"):
+            table.add_row("Indexing Delay Bypass", "[bold yellow]TRUE (Manual Override)[/bold yellow]")
+            
         table.add_row("Registered By", res["registered_by"])
         table.add_row("Source Match URL", res["source_url"])
         table.add_row("Block Timestamp", ts_str)
@@ -273,6 +303,7 @@ def run_verify_command(merkle_root: str):
         console.print(Panel(f"[bold red]RECORD NOT FOUND ON-CHAIN[/bold red]\nNo evidence anchored for Merkle Root: {merkle_root}", border_style="red", expand=False))
         sys.exit(2)
 
+
 def main():
     parser = argparse.ArgumentParser(
         description="F.I.B.E.R. - Facial Identification & Blockchain Enforcement Runtime"
@@ -282,6 +313,7 @@ def main():
     
     scan_sub = subparsers.add_parser("scan", help="Run 6-step enforcement pipeline on target image")
     scan_sub.add_argument("image_path", type=str, help="Path to input image file")
+    scan_sub.add_argument("--manual-url", type=str, help="Bypass search and directly verify a post URL", default=None)
     
     verify_sub = subparsers.add_parser("verify", help="Verify existing Merkle Root on Arbitrum Sepolia")
     verify_sub.add_argument("merkle_root", type=str, help="Bytes32 hex Merkle Root")
@@ -292,7 +324,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "scan":
-        run_scan_pipeline(args.image_path, is_tamper_test=False)
+        run_scan_pipeline(args.image_path, is_tamper_test=False, manual_url=args.manual_url)
     elif args.command == "verify":
         run_verify_command(args.merkle_root)
     elif args.command == "tamper-test":
