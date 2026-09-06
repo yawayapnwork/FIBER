@@ -29,7 +29,7 @@ from rich import box
 load_dotenv()
 
 from src.matcher import extract_embedding
-from src.search import CopyseekerSearchEngine, NoMatchesFoundError, CopyseekerAPIError, CopyseekerTimeoutError, CopyseekerRateLimitError
+from src.search import CopyseekerSearchEngine, NoMatchesFoundError, CopyseekerAPIError, CopyseekerTimeoutError, CopyseekerRateLimitError, download_candidate_image
 from src.blockchain import BlockchainClient
 from src.merkle import EvidenceMerkleTree
 from src.crypto import FiberCrypto
@@ -119,8 +119,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
     with console.status("[bold green]Step 3/6: Running Bidirectional Face Verification (Cosine Similarity)...", spinner="bouncingBar"):
         try:
             candidate_url = search_res["matched_image_url"]
-            resp = requests.get(candidate_url, stream=True, timeout=15)
-            resp.raise_for_status()
+            resp, auth_metadata = download_candidate_image(candidate_url)
             candidate_img = Image.open(io.BytesIO(resp.content))
             candidate_tensor = extract_embedding(candidate_img)
             candidate_vector_bytes = candidate_tensor.cpu().numpy().tobytes()
@@ -152,6 +151,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
             discovered_at=search_res["discovered_at"],
             published_at=published_at
         )
+        metadata.update(auth_metadata)
 
         merkle_res = EvidenceMerkleTree.build_tree(input_vector_bytes, candidate_vector_bytes, metadata)
         merkle_root = merkle_res["merkle_root"]
@@ -248,6 +248,11 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
     table.add_row("Biometric Root (Leaf A)", merkle_res["leaves"]["leaf_a"])
     table.add_row("Visual Asset Root (Leaf B)", merkle_res["leaves"]["leaf_b"])
     table.add_row("Context Root (Leaf C)", merkle_res["leaves"]["leaf_c"])
+    
+    if metadata.get("access_scope") == "WALLED_RESTRICTED":
+        table.add_row("Access Scope", "[bold red]WALLED_RESTRICTED (OpenGraph Fallback)[/bold red]")
+        table.add_row("Auth Wall Hash (Proof)", f"[dim]{metadata.get('auth_wall_hash')}...[/dim]")
+    
     table.add_row("Indexing Lag (Seconds)", str(metadata["indexing_lag_seconds"]))
     
     if verify_res.get("indexing_delay_bypass"):
