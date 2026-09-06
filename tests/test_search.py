@@ -3,17 +3,19 @@ QA & Automation Unit Tests for src/search.py
 Using pytest and unittest.mock.
 """
 
+from unittest.mock import MagicMock, patch
+
 import pytest
-from unittest.mock import patch, MagicMock
-from PIL import Image
 import requests
+from PIL import Image
+
 from src.search import (
-    CopyseekerSearchEngine,
     CopyseekerRateLimitError,
+    CopyseekerSearchEngine,
     CopyseekerTimeoutError,
     NoMatchesFoundError,
-    CopyseekerAPIError
 )
+
 
 class TestSearchModule:
     @patch("src.search.requests.post")

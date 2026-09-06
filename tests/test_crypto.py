@@ -3,14 +3,13 @@ QA & Automation Unit Tests for src/crypto.py
 Using pytest.
 """
 
-import pytest
-from PIL import Image
 from eth_account import Account
-from src.crypto import generate_evidence_hash, FiberCrypto
+
+from src.crypto import FiberCrypto, generate_evidence_hash
+
 
 class TestCryptoModule:
     def test_rfc8785_canonical_json_determinism(self):
-        # Key rearrangement must yield the exact same SHA-256 hash
         manifest_v1 = {
             "source_url": "https://twitter.com/user/status/100",
             "metadata": {"discovered_at": 1757149500, "confidence": 0.98},
@@ -33,11 +32,8 @@ class TestCryptoModule:
         sample_payload = {"evidence": "test_data_123"}
         hex_str, bytes32_val = generate_evidence_hash(sample_payload)
 
-        # Assert format: '0x' + 64 hex chars = 66 total chars
         assert hex_str.startswith("0x")
         assert len(hex_str) == 66
-
-        # Assert bytes representation is exactly 32 bytes
         assert isinstance(bytes32_val, bytes)
         assert len(bytes32_val) == 32
 

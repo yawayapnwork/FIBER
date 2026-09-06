@@ -5,11 +5,11 @@ Deploys FiberRegistry.sol to Arbitrum Sepolia EVM L2 testnet using web3.py.
 
 import os
 import sys
-import json
 from pathlib import Path
+
 from dotenv import load_dotenv
-from web3 import Web3
 from eth_account import Account
+from web3 import Web3
 
 # Load environment variables from .env
 load_dotenv()
@@ -43,7 +43,7 @@ def compile_contract():
                 output_values=["abi", "bin"],
                 solc_version="0.8.20"
             )
-            contract_id = f"{str(CONTRACT_PATH)}:FiberRegistry"
+            contract_id = f"{CONTRACT_PATH!s}:FiberRegistry"
             abi = compiled[contract_id]["abi"]
             bytecode = compiled[contract_id]["bin"]
             return abi, bytecode
@@ -74,14 +74,14 @@ def deploy():
     balance_wei = w3.eth.get_balance(account.address)
     balance_eth = w3.from_wei(balance_wei, 'ether')
 
-    print(f"==================================================")
-    print(f"  F.I.B.E.R. Arbitrum Sepolia Deployment")
-    print(f"==================================================")
+    print("==================================================")
+    print("  F.I.B.E.R. Arbitrum Sepolia Deployment")
+    print("==================================================")
     print(f"  RPC Endpoint:     {rpc_url}")
     print(f"  Chain ID:         {chain_id}")
     print(f"  Deployer Address: {account.address}")
     print(f"  Deployer Balance: {balance_eth:.6f} ETH")
-    print(f"==================================================")
+    print("==================================================")
 
     if balance_wei == 0:
         print("[!] WARNING: Deployer balance is 0 ETH. Please request Arbitrum Sepolia testnet ETH from a faucet.")
@@ -120,15 +120,15 @@ def deploy():
 
     receipt = w3.eth.wait_for_transaction_receipt(tx_hash, timeout=120)
 
-    print(f"\n==================================================")
-    print(f"  DEPLOYMENT SUCCESSFUL!")
-    print(f"==================================================")
+    print("\n==================================================")
+    print("  DEPLOYMENT SUCCESSFUL!")
+    print("==================================================")
     print(f"  Contract Address: {receipt.contractAddress}")
     print(f"  Transaction Hash: {receipt.transactionHash.hex()}")
     print(f"  Block Number:     {receipt.blockNumber}")
     print(f"  Gas Used:         {receipt.gasUsed}")
-    print(f"==================================================")
-    print(f"\n[!] Update your .env file with:")
+    print("==================================================")
+    print("\n[!] Update your .env file with:")
     print(f"CONTRACT_ADDRESS={receipt.contractAddress}")
 
 if __name__ == "__main__":

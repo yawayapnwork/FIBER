@@ -5,29 +5,27 @@ Reverse Visual Search using RapidAPI's Copyseeker API.
 STRICT CONSTRAINT: Zero Google APIs (No Google Vision, Lens, SerpAPI).
 """
 
+import io
 import os
 import time
-from typing import Dict, Any, Optional, Union, List
+from typing import Any
+from urllib.parse import urlparse
+
 import requests
 from PIL import Image
-import io
-from urllib.parse import urlparse
+
 
 class CopyseekerAPIError(Exception):
     """Base exception for Copyseeker API errors."""
-    pass
 
 class CopyseekerTimeoutError(CopyseekerAPIError):
     """Raised when Copyseeker API request times out."""
-    pass
 
 class CopyseekerRateLimitError(CopyseekerAPIError):
     """Raised when RapidAPI rate limit is exceeded (HTTP 429)."""
-    pass
 
 class NoMatchesFoundError(CopyseekerAPIError):
     """Raised when reverse visual search yields no matching URLs."""
-    pass
 
 SOCIAL_DOMAINS = [
     "twitter.com",
@@ -44,13 +42,13 @@ class CopyseekerSearchEngine:
     API_URL_FILE = "https://copyseeker.p.rapidapi.com/by_image"
     API_URL_LINK = "https://copyseeker.p.rapidapi.com/by_url"
 
-    def __init__(self, api_key: Optional[str] = None, timeout: int = 15):
+    def __init__(self, api_key: str | None = None, timeout: int = 15):
         self.api_key = api_key or os.getenv("RAPIDAPI_KEY")
         if not self.api_key:
             raise ValueError("RAPIDAPI_KEY environment variable or api_key parameter is required.")
         self.timeout = timeout
 
-    def search(self, image_input: Union[str, Image.Image]) -> Dict[str, Any]:
+    def search(self, image_input: str | Image.Image) -> dict[str, Any]:
         """
         Perform reverse image search via RapidAPI Copyseeker API.
         
@@ -63,7 +61,7 @@ class CopyseekerSearchEngine:
         }
 
         try:
-            if isinstance(image_input, str) and (image_input.startswith("http://") or image_input.startswith("https://")):
+            if isinstance(image_input, str) and image_input.startswith(("http://", "https://")):
                 # Search by image URL
                 response = requests.post(
                     self.API_URL_LINK,
@@ -112,11 +110,11 @@ class CopyseekerSearchEngine:
 
         return self._process_search_results(data)
 
-    def _process_search_results(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _process_search_results(self, raw_data: dict[str, Any]) -> dict[str, Any]:
         """
         Parse raw Copyseeker API results, prioritize social domains, and fallback to highest-ranking match.
         """
-        matches: List[Dict[str, Any]] = []
+        matches: list[dict[str, Any]] = []
 
         # Extract items from common Copyseeker response formats
         raw_matches = (
@@ -163,9 +161,9 @@ class CopyseekerSearchEngine:
         }
 
 def perform_reverse_search(
-    image_input: Union[str, Image.Image],
-    api_key: Optional[str] = None
-) -> Dict[str, Any]:
+    image_input: str | Image.Image,
+    api_key: str | None = None
+) -> dict[str, Any]:
     """Helper function to perform reverse visual search."""
     engine = CopyseekerSearchEngine(api_key=api_key)
     return engine.search(image_input)

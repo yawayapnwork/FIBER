@@ -3,16 +3,18 @@ F.I.B.E.R. Crypto Module
 Canonical manifest creation, SHA-256 / Keccak-256 fingerprinting, and ECDSA message signing.
 """
 
-import json
 import hashlib
-from typing import Dict, Any, Tuple
-from PIL import Image
 import io
+import json
+from typing import Any
+
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from PIL import Image
 from web3 import Web3
 
-def generate_evidence_hash(evidence_data: dict) -> Tuple[str, bytes]:
+
+def generate_evidence_hash(evidence_data: dict) -> tuple[str, bytes]:
     """
     Generate canonical evidence hash according to RFC 8785 JSON formatting.
 
@@ -40,12 +42,12 @@ def generate_evidence_hash(evidence_data: dict) -> Tuple[str, bytes]:
 
 class FiberCrypto:
     @staticmethod
-    def generate_evidence_hash(evidence_data: dict) -> Tuple[str, bytes]:
+    def generate_evidence_hash(evidence_data: dict) -> tuple[str, bytes]:
         """Wrapper for generate_evidence_hash."""
         return generate_evidence_hash(evidence_data)
 
     @staticmethod
-    def hash_image_bytes(image_bytes: bytes) -> Tuple[str, bytes]:
+    def hash_image_bytes(image_bytes: bytes) -> tuple[str, bytes]:
         """Calculate SHA-256 hash of raw image bytes returning (0x-hex, bytes32)."""
         digest = hashlib.sha256(image_bytes).digest()
         return "0x" + digest.hex(), digest
@@ -64,7 +66,7 @@ class FiberCrypto:
         return Web3.solidity_keccak(["string"], [text])
 
     @staticmethod
-    def sign_facial_record(private_key: str, face_hash: bytes, metadata_uri: str) -> Dict[str, Any]:
+    def sign_facial_record(private_key: str, face_hash: bytes, metadata_uri: str) -> dict[str, Any]:
         """
         Sign a facial record off-chain using private key.
         """

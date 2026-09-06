@@ -4,12 +4,15 @@ Using pytest and unittest.mock.
 """
 
 import os
-import pytest
-from unittest.mock import patch, MagicMock
-from PIL import Image
+from unittest.mock import MagicMock, patch
+
 import numpy as np
-from src.vision import extract_face, FaceDetector
+import pytest
+from PIL import Image
+
 import src.vision
+from src.vision import extract_face
+
 
 class TestVisionPipeline:
     @pytest.fixture(autouse=True)

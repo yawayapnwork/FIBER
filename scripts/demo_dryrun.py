@@ -6,15 +6,15 @@ Usage:
   python scripts/demo_dryrun.py [--mock-search] [--image PATH]
 """
 
+import argparse
 import os
 import sys
-import io
 import time
-import argparse
 import webbrowser
+
 import requests
-from PIL import Image, ImageDraw
 from dotenv import load_dotenv
+from PIL import Image, ImageDraw
 
 # Fix Windows console UTF-8 output encoding if needed
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
@@ -26,18 +26,16 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 # Rich UI Integration
 from rich.console import Console
 from rich.panel import Panel
-from rich.table import Table
-from rich import box
 
 # Load environment variables
 load_dotenv()
 
 # Import F.I.B.E.R. modules
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from src.vision import extract_face_info
-from src.search import CopyseekerSearchEngine, NoMatchesFoundError, CopyseekerAPIError
-from src.crypto import generate_evidence_hash, FiberCrypto
 from src.blockchain import BlockchainClient
+from src.crypto import FiberCrypto, generate_evidence_hash
+from src.search import CopyseekerAPIError, CopyseekerSearchEngine, NoMatchesFoundError
+from src.vision import extract_face_info
 
 console = Console()
 
@@ -48,7 +46,7 @@ def ensure_sample_image(image_path: str = "demo_portrait.jpg") -> str:
     if os.path.exists(image_path):
         return image_path
 
-    console.print(f"[dim][*] Fetching sample portrait image from public CDN...[/dim]")
+    console.print("[dim][*] Fetching sample portrait image from public CDN...[/dim]")
     try:
         resp = requests.get(SAMPLE_PORTRAIT_URL, timeout=10)
         if resp.status_code == 200:
@@ -133,7 +131,7 @@ def run_dryrun(image_path: str, mock_search: bool = False):
         "page_title": search_res["page_title"],
         "discovered_at": search_res["discovered_at"]
     }
-    hex_evidence_hash, bytes32_hash = generate_evidence_hash(evidence_manifest)
+    hex_evidence_hash, _ = generate_evidence_hash(evidence_manifest)
     console.print(f"  [bold green][+] SHA-256 State Fingerprint:[/bold green] [cyan]{hex_evidence_hash}[/cyan]")
     time.sleep(2)
 
@@ -141,7 +139,7 @@ def run_dryrun(image_path: str, mock_search: bool = False):
     console.print("\n[bold green][STEP 4/5] Anchoring Evidence to Arbitrum Sepolia EVM L2...[/bold green]")
     client = BlockchainClient()
     if not client.is_connected():
-        console.print(f"[bold yellow][!] Offline Mode: RPC connection failed. Simulating on-chain transaction.[/bold yellow]")
+        console.print("[bold yellow][!] Offline Mode: RPC connection failed. Simulating on-chain transaction.[/bold yellow]")
         anchor_res = {
             "tx_hash": "0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b",
             "block_number": 14920381,
@@ -160,7 +158,7 @@ def run_dryrun(image_path: str, mock_search: bool = False):
                 }
 
     console.print(f"  [bold green][+] Mined on Arbitrum Sepolia:[/bold green] Tx {anchor_res['tx_hash']} (Block #{anchor_res['block_number']})")
-    console.print(f"  [bold cyan][*] Opening Arbiscan Sepolia Explorer in Browser...[/bold cyan]")
+    console.print("  [bold cyan][*] Opening Arbiscan Sepolia Explorer in Browser...[/bold cyan]")
     webbrowser.open(anchor_res["explorer_url"])
     time.sleep(3)
 

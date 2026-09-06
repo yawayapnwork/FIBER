@@ -1,0 +1,55 @@
+name: F.I.B.E.R. CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Build & Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+    - name: Checkout Code Repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+
+    - name: Cache PyTorch Model Checkpoints
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/torch/checkpoints
+        key: ${{ runner.os }}-torch-${{ matrix.python-version }}-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-torch-${{ matrix.python-version }}-
+          ${{ runner.os }}-torch-
+
+    - name: Install Python Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install ruff solc-select pytest
+
+    - name: Run Code Linting & Syntax Checks
+      run: |
+        ruff check src/ tests/ main.py scripts/
+
+    - name: Compile Solidity Smart Contract (FiberRegistry.sol)
+      run: |
+        solc-select install 0.8.20
+        solc-select use 0.8.20
+        solc --bin --abi --optimize contracts/FiberRegistry.sol
+
+    - name: Run Offline Unit & Integration Tests
+      run: |
+        pytest tests/ -v

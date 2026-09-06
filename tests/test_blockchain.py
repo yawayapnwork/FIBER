@@ -3,9 +3,10 @@ QA & Automation Unit Tests for src/blockchain.py
 Using pytest and unittest.mock.
 """
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from src.blockchain import BlockchainClient
+
 
 class TestBlockchainModule:
     def test_blockchain_client_initialization_defaults(self):
@@ -26,14 +27,12 @@ class TestBlockchainModule:
     @patch("src.blockchain.Web3")
     @patch("src.blockchain.Account")
     def test_anchor_evidence_offline_mock(self, mock_account_cls, mock_web3_cls):
-        # Mock Web3 instance and transaction signing
         mock_w3_inst = MagicMock()
         mock_w3_inst.is_connected.return_value = True
         mock_w3_inst.eth.chain_id = 421614
         mock_w3_inst.eth.get_transaction_count.return_value = 5
         mock_w3_inst.eth.gas_price = 100000000
 
-        # Mock contract function
         mock_contract = MagicMock()
         mock_func = MagicMock()
         mock_func.build_transaction.return_value = {
@@ -46,13 +45,11 @@ class TestBlockchainModule:
         mock_contract.functions.anchorEvidence.return_value = mock_func
         mock_w3_inst.eth.contract.return_value = mock_contract
 
-        # Mock transaction signing & raw submission
         mock_signed_tx = MagicMock()
         mock_signed_tx.rawTransaction = b"signed_tx_raw_bytes"
         mock_w3_inst.eth.account.sign_transaction.return_value = mock_signed_tx
         mock_w3_inst.eth.send_raw_transaction.return_value = b"\xaa" * 32
 
-        # Mock transaction receipt
         mock_receipt = MagicMock()
         mock_receipt.transactionHash = b"\xaa" * 32
         mock_receipt.blockNumber = 14920381
@@ -62,7 +59,6 @@ class TestBlockchainModule:
 
         mock_web3_cls.return_value = mock_w3_inst
 
-        # Instantiate BlockchainClient with mock key & contract address
         client = BlockchainClient(
             rpc_url="https://sepolia-rollup.arbitrum.io/rpc",
             private_key="0x" + "11" * 32,
@@ -87,7 +83,6 @@ class TestBlockchainModule:
         mock_w3_inst = MagicMock()
         mock_contract = MagicMock()
 
-        # Mock verifyEvidence view call
         evidence_hash_bytes = b"\x44" * 32
         mock_record_tuple = (
             evidence_hash_bytes,

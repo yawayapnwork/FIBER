@@ -4,16 +4,17 @@ End-to-End Mocked Pipeline Test covering all 5 steps offline.
 """
 
 import os
-import pytest
-from unittest.mock import patch, MagicMock
-from PIL import Image
-import numpy as np
+from unittest.mock import MagicMock, patch
 
-from src.vision import extract_face
-from src.search import CopyseekerSearchEngine
-from src.crypto import generate_evidence_hash, FiberCrypto
+import numpy as np
+import pytest
+from PIL import Image
+
 from src.blockchain import BlockchainClient
-from main import run_scan_pipeline, run_verify_command
+from src.crypto import FiberCrypto, generate_evidence_hash
+from src.search import CopyseekerSearchEngine
+from src.vision import extract_face
+
 
 class TestEndToEndPipeline:
     @pytest.fixture(autouse=True)
@@ -22,11 +23,9 @@ class TestEndToEndPipeline:
         self.input_file = str(self.tmp_dir / "target_person.jpg")
         self.crop_file = str(self.tmp_dir / "cropped_face.jpg")
 
-        # Create input image
         img = Image.new("RGB", (250, 250), color=(150, 150, 150))
         img.save(self.input_file)
         yield
-        # Clean up
         for f in [self.input_file, self.crop_file, "cropped_face.jpg", "temp_crop.jpg"]:
             if os.path.exists(f):
                 try:
@@ -43,7 +42,6 @@ class TestEndToEndPipeline:
         mock_http_post,
         mock_mtcnn_cls
     ):
-        # 1. Mock MTCNN vision face detection
         mock_mtcnn_inst = MagicMock()
         mock_mtcnn_inst.detect.return_value = (
             np.array([[40.0, 40.0, 180.0, 180.0]]),
@@ -51,7 +49,6 @@ class TestEndToEndPipeline:
         )
         mock_mtcnn_cls.return_value = mock_mtcnn_inst
 
-        # 2. Mock Copyseeker search API
         mock_search_resp = MagicMock()
         mock_search_resp.status_code = 200
         mock_search_resp.json.return_value = {
@@ -65,7 +62,6 @@ class TestEndToEndPipeline:
         }
         mock_http_post.return_value = mock_search_resp
 
-        # 3. Mock Web3 Arbitrum Sepolia L2 client
         mock_w3 = MagicMock()
         mock_w3.is_connected.return_value = True
         mock_w3.eth.chain_id = 421614
@@ -83,7 +79,6 @@ class TestEndToEndPipeline:
         }
         mock_contract.functions.anchorEvidence.return_value = mock_func
 
-        # Mock view function verifyEvidence
         evidence_hash_bytes = b"\x55" * 32
         mock_record_tuple = (
             evidence_hash_bytes,
@@ -107,16 +102,13 @@ class TestEndToEndPipeline:
 
         mock_web3_cls.return_value = mock_w3
 
-        # Execute step 1: Vision
         crop_path = extract_face(self.input_file, output_path=self.crop_file)
         assert os.path.exists(crop_path)
 
-        # Execute step 2: Search
         search_engine = CopyseekerSearchEngine(api_key="mock_key")
         search_res = search_engine.search(crop_path)
         assert search_res["source_url"] == "https://twitter.com/target/status/12345"
 
-        # Execute step 3: Crypto Hash
         crop_img = Image.open(crop_path)
         crop_keccak = FiberCrypto.hash_pil_image(crop_img)
         manifest = {
@@ -129,7 +121,6 @@ class TestEndToEndPipeline:
         assert hex_hash.startswith("0x")
         assert len(bytes_hash) == 32
 
-        # Execute step 4: Blockchain Anchor
         client = BlockchainClient(
             rpc_url="https://sepolia-rollup.arbitrum.io/rpc",
             private_key="0x" + "11" * 32,
@@ -142,7 +133,6 @@ class TestEndToEndPipeline:
         anchor_res = client.anchor(hex_hash, search_res["source_url"])
         assert anchor_res["block_number"] == 14920381
 
-        # Execute step 5: Validation
         verify_res = client.verify(hex_hash)
         assert verify_res["exists"] is True
         assert verify_res["source_url"] == "https://twitter.com/target/status/12345"

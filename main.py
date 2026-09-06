@@ -91,7 +91,7 @@ def run_scan_pipeline(image_path: str):
                 "source_url": f"https://fiber.enforcement/records/{os.path.basename(image_path)}",
                 "page_title": "F.I.B.E.R. Direct Image Record",
                 "matched_image_url": f"file://{os.path.abspath(crop_output_path)}",
-                "discovered_at": int(datetime.datetime.now().timestamp())
+                "discovered_at": int(datetime.datetime.now(datetime.timezone.utc).timestamp())
             }
         except CopyseekerTimeoutError:
             console.print("[bold yellow][!] Step 2 Timeout:[/bold yellow] RapidAPI search timed out. Falling back to local evidence record.")
@@ -99,7 +99,7 @@ def run_scan_pipeline(image_path: str):
                 "source_url": f"https://fiber.enforcement/records/{os.path.basename(image_path)}",
                 "page_title": "F.I.B.E.R. Fallback Evidence Record",
                 "matched_image_url": f"file://{os.path.abspath(crop_output_path)}",
-                "discovered_at": int(datetime.datetime.now().timestamp())
+                "discovered_at": int(datetime.datetime.now(datetime.timezone.utc).timestamp())
             }
         except (CopyseekerRateLimitError, CopyseekerAPIError) as e:
             console.print(f"[bold yellow][!] Step 2 API Warning ({e}):[/bold yellow] Falling back to local evidence URI.")
@@ -107,7 +107,7 @@ def run_scan_pipeline(image_path: str):
                 "source_url": f"https://fiber.enforcement/records/{os.path.basename(image_path)}",
                 "page_title": "F.I.B.E.R. Local Evidence Record",
                 "matched_image_url": f"file://{os.path.abspath(crop_output_path)}",
-                "discovered_at": int(datetime.datetime.now().timestamp())
+                "discovered_at": int(datetime.datetime.now(datetime.timezone.utc).timestamp())
             }
 
     console.print(f"[bold green][+] Step 2 Complete:[/bold green] Match discovered: [blue link={search_res['source_url']}]{search_res['source_url']}[/blue link]")
@@ -124,7 +124,7 @@ def run_scan_pipeline(image_path: str):
             "discovered_at": search_res["discovered_at"]
         }
 
-        hex_evidence_hash, bytes32_hash = generate_evidence_hash(evidence_manifest)
+        hex_evidence_hash, _ = generate_evidence_hash(evidence_manifest)
 
     console.print(f"[bold green][+] Step 3 Complete:[/bold green] Canonical Fingerprint: [cyan]{hex_evidence_hash}[/cyan]")
 
@@ -210,7 +210,7 @@ def run_verify_command(evidence_hash: str):
         table.add_column("Property", style="bold cyan", width=25)
         table.add_column("Value", style="white")
 
-        ts_str = datetime.datetime.fromtimestamp(res['timestamp']).strftime('%Y-%m-%d %H:%M:%S UTC')
+        ts_str = datetime.datetime.fromtimestamp(res['timestamp'], tz=datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
         table.add_row("Verification Status", "[bold green]CONFIRMED (EXISTS)[/bold green]")
         table.add_row("Evidence Hash", res["evidence_hash"])
         table.add_row("Registered By", res["registered_by"])

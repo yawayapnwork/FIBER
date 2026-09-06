@@ -4,9 +4,10 @@ Web3 integration for Arbitrum Sepolia EVM L2 testnet.
 """
 
 import os
-from typing import Dict, Any, Optional
-from web3 import Web3
+from typing import Any
+
 from eth_account import Account
+from web3 import Web3
 
 DEFAULT_ARBITRUM_SEPOLIA_RPC = "https://sepolia-rollup.arbitrum.io/rpc"
 DEFAULT_EXPLORER_URL = "https://sepolia.arbiscan.io"
@@ -71,9 +72,9 @@ FIBER_REGISTRY_ABI = [
 class BlockchainClient:
     def __init__(
         self,
-        rpc_url: Optional[str] = None,
-        private_key: Optional[str] = None,
-        contract_address: Optional[str] = None
+        rpc_url: str | None = None,
+        private_key: str | None = None,
+        contract_address: str | None = None
     ):
         self.rpc_url = rpc_url or os.getenv("ARBITRUM_SEPOLIA_RPC", DEFAULT_ARBITRUM_SEPOLIA_RPC)
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
@@ -99,7 +100,7 @@ class BlockchainClient:
         """Get network Chain ID (Arbitrum Sepolia is 421614)."""
         return self.w3.eth.chain_id
 
-    def anchor(self, evidence_hash_hex: str, source_url: str) -> Dict[str, Any]:
+    def anchor(self, evidence_hash_hex: str, source_url: str) -> dict[str, Any]:
         """
         Build, sign, and broadcast anchorEvidence transaction to Arbitrum Sepolia.
         Includes dynamic gas estimation & fallback for testnet gas price spikes.
@@ -170,7 +171,7 @@ class BlockchainClient:
             "status": receipt.status
         }
 
-    def verify(self, evidence_hash_hex: str) -> Dict[str, Any]:
+    def verify(self, evidence_hash_hex: str) -> dict[str, Any]:
         """
         Call contract's verifyEvidence view function to check on-chain status.
 

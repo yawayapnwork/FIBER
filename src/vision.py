@@ -7,13 +7,15 @@ STRICT CONSTRAINT: DO NOT import `cv2` or use OpenCV anywhere in this file or pr
 
 import os
 import sys
-from typing import List, Dict, Any, Optional, Tuple
-from PIL import Image, ImageOps
+from typing import Any
+
 import torch
 from facenet_pytorch import MTCNN
+from PIL import Image, ImageOps
+
 
 class FaceDetector:
-    def __init__(self, device: Optional[str] = None):
+    def __init__(self, device: str | None = None):
         """Initialize MTCNN face detector using PyTorch and PIL."""
         if device is None:
             self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -33,8 +35,8 @@ def extract_face_info(
     output_path: str = "cropped_face.jpg",
     padding: int = 15,
     min_confidence: float = 0.85,
-    device: Optional[str] = None
-) -> Dict[str, Any]:
+    device: str | None = None
+) -> dict[str, Any]:
     """
     Detect faces, select the largest valid human face, apply padding,
     crop using Pillow, save high-quality JPEG, and return detailed face metrics dictionary.
@@ -67,7 +69,7 @@ def extract_face_info(
     if boxes is None or probs is None or len(boxes) == 0:
         raise ValueError("No valid human face detected")
 
-    valid_faces: List[Tuple[List[float], float, float]] = []
+    valid_faces: list[tuple[list[float], float, float]] = []
     for box, prob in zip(boxes, probs):
         if prob is not None and prob >= min_confidence:
             l, t, r, b = box
@@ -119,7 +121,7 @@ def extract_face(
     output_path: str = "cropped_face.jpg",
     padding: int = 15,
     min_confidence: float = 0.85,
-    device: Optional[str] = None
+    device: str | None = None
 ) -> str:
     """Wrapper returning output_path string."""
     res = extract_face_info(image_path, output_path, padding, min_confidence, device)
