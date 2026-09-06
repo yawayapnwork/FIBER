@@ -21,16 +21,16 @@ try:
 except ImportError:
     SOLCX_AVAILABLE = False
 
-CONTRACT_PATH = Path(__file__).parent.parent / "contracts" / "FiberRegistry.sol"
+CONTRACT_PATH = Path(__file__).parent.parent / "contracts" / "FiberMerkleRegistry.sol"
 DEFAULT_RPC = "https://sepolia-rollup.arbitrum.io/rpc"
 
 def compile_contract():
-    """Compile FiberRegistry.sol using py-solc-x or return compiled bytecode/abi."""
+    """Compile FiberMerkleRegistry.sol using py-solc-x or return compiled bytecode/abi."""
     if not CONTRACT_PATH.exists():
         raise FileNotFoundError(f"Contract file not found at {CONTRACT_PATH}")
 
     if SOLCX_AVAILABLE:
-        print("[+] Compiling FiberRegistry.sol with py-solc-x...")
+        print("[+] Compiling FiberMerkleRegistry.sol with py-solc-x...")
         try:
             installed_versions = solcx.get_installed_solc_versions()
             if not any(v.major == 0 and v.minor == 8 and v.patch >= 20 for v in installed_versions):
@@ -43,7 +43,7 @@ def compile_contract():
                 output_values=["abi", "bin"],
                 solc_version="0.8.20"
             )
-            contract_id = f"{CONTRACT_PATH!s}:FiberRegistry"
+            contract_id = f"{CONTRACT_PATH!s}:FiberMerkleRegistry"
             abi = compiled[contract_id]["abi"]
             bytecode = compiled[contract_id]["bin"]
             return abi, bytecode
@@ -90,13 +90,13 @@ def deploy():
     abi, bytecode = compile_contract()
 
     # Create contract instance
-    FiberRegistry = w3.eth.contract(abi=abi, bytecode=bytecode)
+    FiberMerkleRegistry = w3.eth.contract(abi=abi, bytecode=bytecode)
 
     # Build deployment transaction
     nonce = w3.eth.get_transaction_count(account.address)
     gas_price = w3.eth.gas_price
 
-    tx = FiberRegistry.constructor().build_transaction({
+    tx = FiberMerkleRegistry.constructor().build_transaction({
         "chainId": chain_id,
         "from": account.address,
         "nonce": nonce,
