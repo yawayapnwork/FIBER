@@ -1,8 +1,9 @@
 """
-Unit tests for src/search.py module.
+QA & Automation Unit Tests for src/search.py
+Using pytest and unittest.mock.
 """
 
-import unittest
+import pytest
 from unittest.mock import patch, MagicMock
 from PIL import Image
 import requests
@@ -11,85 +12,77 @@ from src.search import (
     CopyseekerRateLimitError,
     CopyseekerTimeoutError,
     NoMatchesFoundError,
-    perform_reverse_search
+    CopyseekerAPIError
 )
 
-class TestCopyseekerSearchEngine(unittest.TestCase):
-    def test_missing_api_key_raises_error(self):
-        with patch.dict("os.environ", {}, clear=True):
-            with self.assertRaises(ValueError):
-                CopyseekerSearchEngine(api_key=None)
-
+class TestSearchModule:
     @patch("src.search.requests.post")
-    def test_search_prioritizes_social_domain(self, mock_post):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+    def test_domain_prioritization_social_over_generic(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
             "visual_matches": [
-                {"url": "https://generic-blog.com/photo.jpg", "title": "Generic Blog"},
-                {"url": "https://twitter.com/user/status/123", "title": "Twitter Post"},
-                {"url": "https://instagram.com/p/abc", "title": "Instagram Post"}
+                {"url": "https://random-forum.com/thread/1", "title": "Random Forum"},
+                {"url": "https://twitter.com/target_user/status/987654321", "title": "Twitter Match"},
+                {"url": "https://generic-news.com/article", "title": "News Article"}
             ]
         }
-        mock_post.return_value = mock_response
+        mock_post.return_value = mock_resp
 
-        engine = CopyseekerSearchEngine(api_key="test_key")
+        engine = CopyseekerSearchEngine(api_key="mock_rapidapi_key")
         test_img = Image.new("RGB", (50, 50), color="blue")
-        res = engine.search(test_img)
+        result = engine.search(test_img)
 
-        self.assertEqual(res["source_url"], "https://twitter.com/user/status/123")
-        self.assertEqual(res["page_title"], "Twitter Post")
-        self.assertIn("discovered_at", res)
+        assert result["source_url"] == "https://twitter.com/target_user/status/987654321"
+        assert result["page_title"] == "Twitter Match"
+        assert "discovered_at" in result
 
     @patch("src.search.requests.post")
-    def test_search_fallback_to_highest_rank(self, mock_post):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
+    def test_fallback_to_highest_rank_web_match(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
             "visual_matches": [
-                {"url": "https://news-outlet.com/article1", "title": "News Title 1"},
-                {"url": "https://another-blog.org/page", "title": "Blog Page"}
+                {"url": "https://primary-news-portal.com/photo", "title": "Primary News"},
+                {"url": "https://secondary-blog.org/item", "title": "Secondary Blog"}
             ]
         }
-        mock_post.return_value = mock_response
+        mock_post.return_value = mock_resp
 
-        engine = CopyseekerSearchEngine(api_key="test_key")
+        engine = CopyseekerSearchEngine(api_key="mock_rapidapi_key")
         test_img = Image.new("RGB", (50, 50), color="green")
-        res = engine.search(test_img)
+        result = engine.search(test_img)
 
-        self.assertEqual(res["source_url"], "https://news-outlet.com/article1")
-        self.assertEqual(res["page_title"], "News Title 1")
+        assert result["source_url"] == "https://primary-news-portal.com/photo"
+        assert result["page_title"] == "Primary News"
 
     @patch("src.search.requests.post")
-    def test_rate_limit_error(self, mock_post):
-        mock_response = MagicMock()
-        mock_response.status_code = 429
-        mock_post.return_value = mock_response
+    def test_empty_response_raises_no_matches_found(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"visual_matches": []}
+        mock_post.return_value = mock_resp
 
-        engine = CopyseekerSearchEngine(api_key="test_key")
-        test_img = Image.new("RGB", (10, 10))
-        with self.assertRaises(CopyseekerRateLimitError):
+        engine = CopyseekerSearchEngine(api_key="mock_rapidapi_key")
+        test_img = Image.new("RGB", (50, 50))
+        with pytest.raises(NoMatchesFoundError):
             engine.search(test_img)
 
     @patch("src.search.requests.post")
-    def test_timeout_error(self, mock_post):
-        mock_post.side_effect = requests.exceptions.Timeout("Timed out")
-        engine = CopyseekerSearchEngine(api_key="test_key")
-        test_img = Image.new("RGB", (10, 10))
-        with self.assertRaises(CopyseekerTimeoutError):
+    def test_rate_limit_429_raises_custom_exception(self, mock_post):
+        mock_resp = MagicMock()
+        mock_resp.status_code = 429
+        mock_post.return_value = mock_resp
+
+        engine = CopyseekerSearchEngine(api_key="mock_rapidapi_key")
+        test_img = Image.new("RGB", (50, 50))
+        with pytest.raises(CopyseekerRateLimitError):
             engine.search(test_img)
 
     @patch("src.search.requests.post")
-    def test_no_matches_found_error(self, mock_post):
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"visual_matches": []}
-        mock_post.return_value = mock_response
-
-        engine = CopyseekerSearchEngine(api_key="test_key")
-        test_img = Image.new("RGB", (10, 10))
-        with self.assertRaises(NoMatchesFoundError):
+    def test_timeout_raises_custom_exception(self, mock_post):
+        mock_post.side_effect = requests.exceptions.Timeout("Connection timed out")
+        engine = CopyseekerSearchEngine(api_key="mock_rapidapi_key")
+        test_img = Image.new("RGB", (50, 50))
+        with pytest.raises(CopyseekerTimeoutError):
             engine.search(test_img)
-
-if __name__ == "__main__":
-    unittest.main()

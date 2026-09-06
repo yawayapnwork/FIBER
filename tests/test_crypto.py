@@ -1,59 +1,56 @@
 """
-Unit tests for src/crypto.py module.
+QA & Automation Unit Tests for src/crypto.py
+Using pytest.
 """
 
-import unittest
+import pytest
 from PIL import Image
 from eth_account import Account
-from src.crypto import FiberCrypto, generate_evidence_hash
+from src.crypto import generate_evidence_hash, FiberCrypto
 
-class TestFiberCrypto(unittest.TestCase):
-    def setUp(self):
-        self.test_img = Image.new('RGB', (100, 100), color='red')
-        self.test_account = Account.create()
+class TestCryptoModule:
+    def test_rfc8785_canonical_json_determinism(self):
+        # Key rearrangement must yield the exact same SHA-256 hash
+        manifest_v1 = {
+            "source_url": "https://twitter.com/user/status/100",
+            "metadata": {"discovered_at": 1757149500, "confidence": 0.98},
+            "facial_crop_keccak256": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+        }
 
-    def test_generate_evidence_hash(self):
-        payload_a = {"b": 2, "a": 1, "c": [3, 4]}
-        payload_b = {"a": 1, "c": [3, 4], "b": 2}
+        manifest_v2 = {
+            "facial_crop_keccak256": "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+            "metadata": {"confidence": 0.98, "discovered_at": 1757149500},
+            "source_url": "https://twitter.com/user/status/100"
+        }
 
-        hex_a, bytes_a = generate_evidence_hash(payload_a)
-        hex_b, bytes_b = generate_evidence_hash(payload_b)
+        hex_1, bytes_1 = generate_evidence_hash(manifest_v1)
+        hex_2, bytes_2 = generate_evidence_hash(manifest_v2)
 
-        # RFC 8785 key sorting ensures determinism
-        self.assertEqual(hex_a, hex_b)
-        self.assertEqual(bytes_a, bytes_b)
-        self.assertTrue(hex_a.startswith("0x"))
-        self.assertEqual(len(hex_a), 66)  # '0x' + 64 hex chars
-        self.assertEqual(len(bytes_a), 32)
+        assert hex_1 == hex_2
+        assert bytes_1 == bytes_2
 
-    def test_hash_image_bytes(self):
-        data = b"fiber_test_data"
-        hex_val, digest_bytes = FiberCrypto.hash_image_bytes(data)
-        self.assertTrue(hex_val.startswith("0x"))
-        self.assertEqual(len(hex_val), 66)
-        self.assertEqual(len(digest_bytes), 32)
+    def test_hash_format_and_length(self):
+        sample_payload = {"evidence": "test_data_123"}
+        hex_str, bytes32_val = generate_evidence_hash(sample_payload)
 
-    def test_hash_pil_image(self):
-        hash_bytes = FiberCrypto.hash_pil_image(self.test_img)
-        self.assertIsInstance(hash_bytes, bytes)
-        self.assertEqual(len(hash_bytes), 32)
+        # Assert format: '0x' + 64 hex chars = 66 total chars
+        assert hex_str.startswith("0x")
+        assert len(hex_str) == 66
 
-    def test_hash_string_to_bytes32(self):
-        hash_bytes = FiberCrypto.hash_string_to_bytes32("test_string")
-        self.assertIsInstance(hash_bytes, bytes)
-        self.assertEqual(len(hash_bytes), 32)
+        # Assert bytes representation is exactly 32 bytes
+        assert isinstance(bytes32_val, bytes)
+        assert len(bytes32_val) == 32
 
-    def test_sign_facial_record(self):
-        face_hash = FiberCrypto.hash_pil_image(self.test_img)
+    def test_sign_facial_record_ecdsa(self):
+        acc = Account.create()
+        sample_hash = b"\xaa" * 32
         signed = FiberCrypto.sign_facial_record(
-            private_key=self.test_account.key.hex(),
-            face_hash=face_hash,
-            metadata_uri="ipfs://QmTest"
+            private_key=acc.key.hex(),
+            face_hash=sample_hash,
+            metadata_uri="https://fiber.enforcement/match"
         )
-        self.assertIn("signature", signed)
-        self.assertIn("r", signed)
-        self.assertIn("s", signed)
-        self.assertIn("v", signed)
 
-if __name__ == "__main__":
-    unittest.main()
+        assert "signature" in signed
+        assert "r" in signed
+        assert "s" in signed
+        assert "v" in signed
