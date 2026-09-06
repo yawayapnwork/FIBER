@@ -25,6 +25,7 @@ from src.vision import extract_face_info
 from src.search import CopyseekerSearchEngine, NoMatchesFoundError, CopyseekerAPIError, CopyseekerTimeoutError, CopyseekerRateLimitError
 from src.crypto import generate_evidence_hash, FiberCrypto
 from src.blockchain import BlockchainClient
+from src.exporter import create_evidence_snapshot, export_proof_package, verify_local_snapshot
 
 console = Console()
 
@@ -55,7 +56,7 @@ def parse_social_info(url: str, title: str) -> str:
 
     return f"Platform: [bold yellow]{platform}[/bold yellow] | Title: {title}\nURL: [blue link={url}]{url}[/blue link]"
 
-def run_scan_pipeline(image_path: str, strict_search: bool = False):
+def run_scan_pipeline(image_path: str, strict_search: bool = False, export_report_dir: str | None = None):
     """
     Run full 5-step enforcement pipeline with Rich terminal UI and exit codes.
     - Exit 0: Success (match and anchor verified)
@@ -182,6 +183,23 @@ def run_scan_pipeline(image_path: str, strict_search: bool = False):
 
     console.print(f"[bold green][+] Step 5 Complete:[/bold green] On-Chain Record Verified!")
 
+    # AUTOMATED EVIDENCE AUDIT SNAPSHOT
+    snapshot_dir = create_evidence_snapshot(
+        evidence_hash=hex_evidence_hash,
+        input_image_path=image_path,
+        crop_image_path=crop_output_path,
+        search_res=search_res,
+        anchor_res=anchor_res,
+        verify_res=verify_res,
+        manifest=evidence_manifest
+    )
+    console.print(f"[bold green][+] Data Provenance Snapshot Saved:[/bold green] [cyan]{snapshot_dir}[/cyan]")
+
+    zip_export_path = None
+    if export_report_dir:
+        zip_export_path = export_proof_package(export_report_dir)
+        console.print(f"[bold green][+] Portable Proof Package Exported:[/bold green] [cyan]{zip_export_path}[/cyan]")
+
     # OUTPUT CLEAN SUMMARY TABLE
     console.print("\n")
     table = Table(title="F.I.B.E.R. Enforcement Summary", box=box.ROUNDED, header_style="bold magenta")
@@ -198,6 +216,9 @@ def run_scan_pipeline(image_path: str, strict_search: bool = False):
     table.add_row("Arbitrum Tx Hash", f"{anchor_res['tx_hash']} (Block #{anchor_res['block_number']})")
     table.add_row("Arbiscan Explorer Link", f"[blue link={anchor_res['explorer_url']}]{anchor_res['explorer_url']}[/blue link]")
     table.add_row("Registered By (Registrar)", verify_res["registered_by"])
+    table.add_row("Evidence Snapshot Directory", snapshot_dir)
+    if zip_export_path:
+        table.add_row("Exported Portable Proof Zip", zip_export_path)
 
     console.print(table)
     console.print(Panel("[bold green]ENFORCEMENT PIPELINE COMPLETED SUCCESSFULLY (Exit Code 0)[/bold green]", border_style="green", expand=False))
@@ -242,32 +263,80 @@ def run_verify_command(evidence_hash: str):
         console.print(Panel(f"[bold red]RECORD NOT FOUND ON-CHAIN[/bold red]\nNo evidence anchored for hash: {evidence_hash}", border_style="red", expand=False))
         sys.exit(2)
 
+def run_verify_snapshot_command(manifest_path: str):
+    """
+    Recalculates SHA-256 of saved manifest and verifies against Arbitrum Sepolia contract.
+    """
+    print_banner()
+    with console.status("[bold green]Verifying Local Snapshot Manifest & On-Chain State...", spinner="dots"):
+        try:
+            res = verify_local_snapshot(manifest_path)
+        except Exception as e:
+            console.print(f"[bold red][X] Snapshot Verification Failed:[/bold red] {e}")
+            sys.exit(2)
+
+    table = Table(title="Audit Snapshot & On-Chain State Verified", box=box.ROUNDED, header_style="bold green")
+    table.add_column("Property", style="bold cyan", width=28)
+    table.add_column("Value", style="white")
+
+    table.add_row("Local Integrity", "[bold green]PASSED (SHA-256 Match)[/bold green]")
+    table.add_row("Evidence SHA-256 Digest", res["evidence_sha256"])
+    table.add_row("On-Chain Status", "[bold green]CONFIRMED (EXISTS)[/bold green]")
+    table.add_row("Registered By", res["on_chain_record"]["registered_by"])
+    table.add_row("Source Match URL", res["on_chain_record"]["source_url"])
+    table.add_row("Receipt Metadata File", res["receipt_file"])
+
+    console.print(table)
+    sys.exit(0)
+
 def main():
     parser = argparse.ArgumentParser(
         description="F.I.B.E.R. - Facial Identification & Blockchain Enforcement Runtime"
     )
     parser.add_argument("--scan", type=str, help="Run 5-step enforcement pipeline on target image")
     parser.add_argument("--verify", type=str, help="Verify existing evidence hash on Arbitrum Sepolia")
+    parser.add_argument("--export-report", type=str, help="Export complete proof package into zip archive in specified output directory")
+    parser.add_argument("--verify-snapshot", type=str, help="Verify local snapshot receipt.json against on-chain state")
     parser.add_argument("--strict-search", action="store_true", help="Fail pipeline if visual search returns zero matches")
 
     subparsers = parser.add_subparsers(dest="command", help="Subcommands")
+    
     scan_sub = subparsers.add_parser("scan", help="Run 5-step enforcement pipeline on target image")
     scan_sub.add_argument("image_path", type=str, help="Path to input image file")
     scan_sub.add_argument("--strict-search", action="store_true", help="Fail pipeline if visual search returns zero matches")
+    scan_sub.add_argument("--export-report", type=str, help="Export complete proof package into zip archive in specified output directory")
 
     verify_sub = subparsers.add_parser("verify", help="Verify existing evidence hash on Arbitrum Sepolia")
     verify_sub.add_argument("evidence_hash", type=str, help="Bytes32 hex evidence hash")
 
+    verify_snap_sub = subparsers.add_parser("verify-snapshot", help="Verify local snapshot receipt.json against on-chain state")
+    verify_snap_sub.add_argument("manifest_path", type=str, help="Path to receipt.json or snapshot directory")
+
+    export_sub = subparsers.add_parser("export-report", help="Export audit logs into portable zip proof package")
+    export_sub.add_argument("output_dir", type=str, help="Destination directory or zip filepath")
+
     args = parser.parse_args()
 
     if args.scan:
-        run_scan_pipeline(args.scan, strict_search=args.strict_search)
+        run_scan_pipeline(args.scan, strict_search=args.strict_search, export_report_dir=args.export_report)
     elif args.verify:
         run_verify_command(args.verify)
+    elif args.verify_snapshot:
+        run_verify_snapshot_command(args.verify_snapshot)
     elif args.command == "scan":
-        run_scan_pipeline(args.image_path, strict_search=args.strict_search)
+        run_scan_pipeline(args.image_path, strict_search=args.strict_search, export_report_dir=args.export_report)
     elif args.command == "verify":
         run_verify_command(args.evidence_hash)
+    elif args.command == "verify-snapshot":
+        run_verify_snapshot_command(args.manifest_path)
+    elif args.command == "export-report":
+        zip_path = export_proof_package(args.output_dir)
+        console.print(f"[bold green][+] Proof Package Exported Successfully:[/bold green] [cyan]{zip_path}[/cyan]")
+        sys.exit(0)
+    elif args.export_report and not args.scan and not args.command:
+        zip_path = export_proof_package(args.export_report)
+        console.print(f"[bold green][+] Proof Package Exported Successfully:[/bold green] [cyan]{zip_path}[/cyan]")
+        sys.exit(0)
     else:
         parser.print_help()
         sys.exit(1)
