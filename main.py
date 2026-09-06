@@ -71,14 +71,14 @@ def run_scan_pipeline(image_path: str):
             face_info = extract_face_info(image_path, output_path=crop_output_path, padding=15)
             crop_path = face_info["output_path"]
         except ValueError as e:
-            console.print(f"[bold red][✗] Step 1 Detection Failure:[/bold red] {e}")
+            console.print(f"[bold red][X] Step 1 Detection Failure:[/bold red] {e}")
             console.print("[dim]Hint: Ensure the image contains a clear front-facing human face.[/dim]")
             sys.exit(1)
         except Exception as e:
-            console.print(f"[bold red][✗] Image Processing Error:[/bold red] {e}")
+            console.print(f"[bold red][X] Image Processing Error:[/bold red] {e}")
             sys.exit(1)
 
-    console.print(f"[bold green][✓] Step 1 Complete:[/bold green] Face extracted successfully ({face_info['width']}x{face_info['height']}px)")
+    console.print(f"[bold green][+] Step 1 Complete:[/bold green] Face extracted successfully ({face_info['width']}x{face_info['height']}px)")
 
     # STEP 2: Reverse Visual Search
     with console.status("[bold green]Step 2/5: Querying Copyseeker Reverse Visual Search Index...", spinner="earth"):
@@ -110,7 +110,7 @@ def run_scan_pipeline(image_path: str):
                 "discovered_at": int(datetime.datetime.now().timestamp())
             }
 
-    console.print(f"[bold green][✓] Step 2 Complete:[/bold green] Match discovered: [blue link={search_res['source_url']}]{search_res['source_url']}[/blue link]")
+    console.print(f"[bold green][+] Step 2 Complete:[/bold green] Match discovered: [blue link={search_res['source_url']}]{search_res['source_url']}[/blue link]")
 
     # STEP 3: Canonical Evidence Hashing
     with console.status("[bold green]Step 3/5: Computing RFC 8785 Canonical JSON SHA-256 Fingerprint...", spinner="bouncingBar"):
@@ -126,12 +126,12 @@ def run_scan_pipeline(image_path: str):
 
         hex_evidence_hash, bytes32_hash = generate_evidence_hash(evidence_manifest)
 
-    console.print(f"[bold green][✓] Step 3 Complete:[/bold green] Canonical Fingerprint: [cyan]{hex_evidence_hash}[/cyan]")
+    console.print(f"[bold green][+] Step 3 Complete:[/bold green] Canonical Fingerprint: [cyan]{hex_evidence_hash}[/cyan]")
 
     # STEP 4: Blockchain Anchoring
     client = BlockchainClient()
     if not client.is_connected():
-        console.print(f"[bold red][✗] Step 4 RPC Connection Error:[/bold red] Cannot connect to Arbitrum Sepolia RPC at [cyan]{client.rpc_url}[/cyan]")
+        console.print(f"[bold red][X] Step 4 RPC Connection Error:[/bold red] Cannot connect to Arbitrum Sepolia RPC at [cyan]{client.rpc_url}[/cyan]")
         console.print("[dim]Hint: Check network connectivity or update ARBITRUM_SEPOLIA_RPC in .env.[/dim]")
         sys.exit(2)
 
@@ -139,31 +139,31 @@ def run_scan_pipeline(image_path: str):
         try:
             anchor_res = client.anchor(hex_evidence_hash, search_res["source_url"])
         except ValueError as e:
-            console.print(f"[bold red][✗] Step 4 Configuration Error:[/bold red] {e}")
+            console.print(f"[bold red][X] Step 4 Configuration Error:[/bold red] {e}")
             console.print("[dim]Hint: Please set a valid PRIVATE_KEY and CONTRACT_ADDRESS in your .env file.[/dim]")
             sys.exit(2)
         except RuntimeError as e:
-            console.print(f"[bold red][✗] Step 4 Chain Revert Error:[/bold red] {e}")
+            console.print(f"[bold red][X] Step 4 Chain Revert Error:[/bold red] {e}")
             sys.exit(2)
         except Exception as e:
-            console.print(f"[bold red][✗] Step 4 Transaction Error:[/bold red] {e}")
+            console.print(f"[bold red][X] Step 4 Transaction Error:[/bold red] {e}")
             sys.exit(2)
 
-    console.print(f"[bold green][✓] Step 4 Complete:[/bold green] Transaction mined in Block [cyan]#{anchor_res['block_number']}[/cyan]")
+    console.print(f"[bold green][+] Step 4 Complete:[/bold green] Transaction mined in Block [cyan]#{anchor_res['block_number']}[/cyan]")
 
     # STEP 5: Immediate Validation
     with console.status("[bold green]Step 5/5: Verifying On-Chain Persisted State...", spinner="clock"):
         try:
             verify_res = client.verify(hex_evidence_hash)
         except Exception as e:
-            console.print(f"[bold red][✗] Step 5 Verification Query Failed:[/bold red] {e}")
+            console.print(f"[bold red][X] Step 5 Verification Query Failed:[/bold red] {e}")
             sys.exit(2)
 
     if not verify_res["exists"]:
-        console.print("[bold red][✗] Step 5 Validation Error: Record not found on-chain.[/bold red]")
+        console.print("[bold red][X] Step 5 Validation Error: Record not found on-chain.[/bold red]")
         sys.exit(2)
 
-    console.print(f"[bold green][✓] Step 5 Complete:[/bold green] On-Chain Record Verified!")
+    console.print(f"[bold green][+] Step 5 Complete:[/bold green] On-Chain Record Verified!")
 
     # OUTPUT CLEAN SUMMARY TABLE
     console.print("\n")
@@ -195,14 +195,14 @@ def run_verify_command(evidence_hash: str):
     print_banner()
     client = BlockchainClient()
     if not client.is_connected():
-        console.print(f"[bold red][✗] RPC Connection Error:[/bold red] Cannot connect to Arbitrum Sepolia RPC at [cyan]{client.rpc_url}[/cyan]")
+        console.print(f"[bold red][X] RPC Connection Error:[/bold red] Cannot connect to Arbitrum Sepolia RPC at [cyan]{client.rpc_url}[/cyan]")
         sys.exit(2)
 
     with console.status("[bold green]Querying Arbitrum Sepolia FiberRegistry Contract...", spinner="dots"):
         try:
             res = client.verify(evidence_hash)
         except Exception as e:
-            console.print(f"[bold red][✗] Query Error:[/bold red] {e}")
+            console.print(f"[bold red][X] Query Error:[/bold red] {e}")
             sys.exit(2)
 
     if res["exists"]:

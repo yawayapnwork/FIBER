@@ -38,3 +38,5 @@ wheels/
 # Output crops & artifacts
 crops/
 output/
+*.jpg
+*.png
