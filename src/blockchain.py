@@ -12,60 +12,37 @@ from web3 import Web3
 DEFAULT_ARBITRUM_SEPOLIA_RPC = "https://sepolia-rollup.arbitrum.io/rpc"
 DEFAULT_EXPLORER_URL = "https://sepolia.arbiscan.io"
 
-# ABI for FiberRegistry contract matching anchorEvidence and verifyEvidence
-FIBER_REGISTRY_ABI = [
+# ABI for FiberMerkleRegistry contract matching anchorRoot and verifyRoot
+FIBER_MERKLE_REGISTRY_ABI = [
     {
         "inputs": [
-            {"internalType": "bytes32", "name": "_evidenceHash", "type": "bytes32"},
+            {"internalType": "bytes32", "name": "_merkleRoot", "type": "bytes32"},
             {"internalType": "string", "name": "_sourceUrl", "type": "string"}
         ],
-        "name": "anchorEvidence",
+        "name": "anchorRoot",
         "outputs": [],
         "stateMutability": "nonpayable",
         "type": "function"
     },
     {
-        "inputs": [{"internalType": "bytes32", "name": "_evidenceHash", "type": "bytes32"}],
-        "name": "verifyEvidence",
+        "inputs": [{"internalType": "bytes32", "name": "_merkleRoot", "type": "bytes32"}],
+        "name": "verifyRoot",
         "outputs": [
             {"internalType": "bool", "name": "exists", "type": "bool"},
             {
                 "components": [
-                    {"internalType": "bytes32", "name": "evidenceHash", "type": "bytes32"},
+                    {"internalType": "bytes32", "name": "merkleRoot", "type": "bytes32"},
                     {"internalType": "string", "name": "sourceUrl", "type": "string"},
                     {"internalType": "uint256", "name": "timestamp", "type": "uint256"},
-                    {"internalType": "address", "name": "registeredBy", "type": "address"}
+                    {"internalType": "address", "name": "registrar", "type": "address"}
                 ],
-                "internalType": "struct FiberRegistry.Evidence",
+                "internalType": "struct FiberMerkleRegistry.Record",
                 "name": "record",
                 "type": "tuple"
             }
         ],
         "stateMutability": "view",
         "type": "function"
-    },
-    {
-        "inputs": [{"internalType": "bytes32", "name": "", "type": "bytes32"}],
-        "name": "records",
-        "outputs": [
-            {"internalType": "bytes32", "name": "evidenceHash", "type": "bytes32"},
-            {"internalType": "string", "name": "sourceUrl", "type": "string"},
-            {"internalType": "uint256", "name": "timestamp", "type": "uint256"},
-            {"internalType": "address", "name": "registeredBy", "type": "address"}
-        ],
-        "stateMutability": "view",
-        "type": "function"
-    },
-    {
-        "anonymous": False,
-        "inputs": [
-            {"indexed": True, "internalType": "bytes32", "name": "evidenceHash", "type": "bytes32"},
-            {"indexed": False, "internalType": "string", "name": "sourceUrl", "type": "string"},
-            {"indexed": False, "internalType": "uint256", "name": "timestamp", "type": "uint256"},
-            {"indexed": True, "internalType": "address", "name": "registrar", "type": "address"}
-        ],
-        "name": "EvidenceAnchored",
-        "type": "event"
     }
 ]
 
@@ -88,7 +65,7 @@ class BlockchainClient:
         self.contract_address = contract_address or os.getenv("CONTRACT_ADDRESS")
         if self.contract_address and self.contract_address != "0x0000000000000000000000000000000000000000":
             checksummed = Web3.to_checksum_address(self.contract_address)
-            self.contract = self.w3.eth.contract(address=checksummed, abi=FIBER_REGISTRY_ABI)
+            self.contract = self.w3.eth.contract(address=checksummed, abi=FIBER_MERKLE_REGISTRY_ABI)
         else:
             self.contract = None
 
@@ -100,12 +77,12 @@ class BlockchainClient:
         """Get network Chain ID (Arbitrum Sepolia is 421614)."""
         return self.w3.eth.chain_id
 
-    def anchor(self, evidence_hash_hex: str, source_url: str) -> dict[str, Any]:
+    def anchor(self, merkle_root_hex: str, source_url: str) -> dict[str, Any]:
         """
-        Build, sign, and broadcast anchorEvidence transaction to Arbitrum Sepolia.
+        Build, sign, and broadcast anchorRoot transaction to Arbitrum Sepolia.
         Includes dynamic gas estimation & fallback for testnet gas price spikes.
 
-        :param evidence_hash_hex: Hex string of evidence hash (with or without '0x')
+        :param merkle_root_hex: Hex string of Merkle root (with or without '0x')
         :param source_url: Source URL or metadata URI string
         :return: Dict containing tx_hash, block_number, explorer_url
         """
@@ -122,21 +99,21 @@ class BlockchainClient:
             )
 
         # Clean hex string into 32 bytes
-        clean_hex = evidence_hash_hex.replace("0x", "")
-        evidence_bytes32 = bytes.fromhex(clean_hex)
+        clean_hex = merkle_root_hex.replace("0x", "")
+        merkle_bytes32 = bytes.fromhex(clean_hex)
 
         nonce = self.w3.eth.get_transaction_count(self.account.address)
 
         # Dynamic gas estimation with fallback buffer
         try:
-            estimated_gas = self.contract.functions.anchorEvidence(
-                evidence_bytes32, source_url
+            estimated_gas = self.contract.functions.anchorRoot(
+                merkle_bytes32, source_url
             ).estimate_gas({'from': self.account.address})
             gas_limit = int(estimated_gas * 1.25)
         except Exception as e:
             err_str = str(e).lower()
-            if "already registered" in err_str:
-                raise RuntimeError(f"EVM Revert: Evidence already registered on-chain ({evidence_hash_hex})") from e
+            if "alreadyanchored" in err_str or "already anchored" in err_str:
+                raise RuntimeError(f"EVM Revert: Merkle Root already registered on-chain ({merkle_root_hex})") from e
             if "insufficient funds" in err_str:
                 raise ValueError(
                     "Insufficient testnet ETH balance for gas. "
@@ -150,8 +127,8 @@ class BlockchainClient:
         except Exception:
             gas_price = self.w3.to_wei(0.1, 'gwei')
 
-        tx = self.contract.functions.anchorEvidence(
-            evidence_bytes32,
+        tx = self.contract.functions.anchorRoot(
+            merkle_bytes32,
             source_url
         ).build_transaction({
             'chainId': self.get_chain_id(),
@@ -175,8 +152,8 @@ class BlockchainClient:
                     "Please acquire Arbitrum Sepolia testnet ETH from the faucet: "
                     "https://faucet.quicknode.com/arbitrum/sepolia"
                 ) from e
-            if "already registered" in err_str:
-                raise RuntimeError(f"EVM Revert: Evidence already registered on-chain ({evidence_hash_hex})") from e
+            if "alreadyanchored" in err_str or "already anchored" in err_str:
+                raise RuntimeError(f"EVM Revert: Merkle Root already registered on-chain ({merkle_root_hex})") from e
             raise e
 
         tx_hash_hex = tx_hash_bytes.hex()
@@ -202,20 +179,20 @@ class BlockchainClient:
             "status": receipt.status
         }
 
-    def verify(self, evidence_hash_hex: str) -> dict[str, Any]:
+    def verify(self, merkle_root_hex: str) -> dict[str, Any]:
         """
-        Call contract's verifyEvidence view function to check on-chain status.
+        Call contract's verifyRoot view function to check on-chain status.
 
-        :param evidence_hash_hex: Hex string of evidence hash
+        :param merkle_root_hex: Hex string of Merkle root
         :return: Dict containing exists flag and decoded record data
         """
         if not self.contract:
             raise ValueError("Valid CONTRACT_ADDRESS is required to query on-chain state.")
 
-        clean_hex = evidence_hash_hex.replace("0x", "")
-        evidence_bytes32 = bytes.fromhex(clean_hex)
+        clean_hex = merkle_root_hex.replace("0x", "")
+        merkle_bytes32 = bytes.fromhex(clean_hex)
 
-        exists, record = self.contract.functions.verifyEvidence(evidence_bytes32).call()
+        exists, record = self.contract.functions.verifyRoot(merkle_bytes32).call()
 
         rec_hash = record[0].hex() if isinstance(record[0], bytes) else record[0]
         if rec_hash and not rec_hash.startswith("0x"):
@@ -223,7 +200,7 @@ class BlockchainClient:
 
         return {
             "exists": exists,
-            "evidence_hash": rec_hash,
+            "merkle_root": rec_hash,
             "source_url": record[1],
             "timestamp": record[2],
             "registered_by": record[3],
