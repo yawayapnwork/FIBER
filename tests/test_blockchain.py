@@ -4,11 +4,11 @@ Unit tests for src/blockchain.py module.
 
 import unittest
 from unittest.mock import patch, MagicMock
-from src.blockchain import ArbitrumFiberClient
+from src.blockchain import BlockchainClient, ArbitrumFiberClient
 
-class TestArbitrumFiberClient(unittest.TestCase):
+class TestBlockchainClient(unittest.TestCase):
     def test_client_init_defaults(self):
-        client = ArbitrumFiberClient(rpc_url="https://sepolia-rollup.arbitrum.io/rpc")
+        client = BlockchainClient(rpc_url="https://sepolia-rollup.arbitrum.io/rpc")
         self.assertEqual(client.rpc_url, "https://sepolia-rollup.arbitrum.io/rpc")
         self.assertIsNone(client.account)
         self.assertIsNone(client.contract)
@@ -19,13 +19,18 @@ class TestArbitrumFiberClient(unittest.TestCase):
         mock_w3_instance.is_connected.return_value = True
         mock_web3_cls.return_value = mock_w3_instance
 
-        client = ArbitrumFiberClient(rpc_url="https://sepolia-rollup.arbitrum.io/rpc")
+        client = BlockchainClient(rpc_url="https://sepolia-rollup.arbitrum.io/rpc")
         self.assertTrue(client.is_connected())
 
-    def test_verify_evidence_no_contract_raises(self):
-        client = ArbitrumFiberClient(rpc_url="https://sepolia-rollup.arbitrum.io/rpc")
+    def test_verify_no_contract_raises(self):
+        client = BlockchainClient(rpc_url="https://sepolia-rollup.arbitrum.io/rpc")
         with self.assertRaises(ValueError):
-            client.verify_evidence(b"\x00" * 32)
+            client.verify("0x" + "00" * 32)
+
+    def test_anchor_no_account_raises(self):
+        client = BlockchainClient(rpc_url="https://sepolia-rollup.arbitrum.io/rpc")
+        with self.assertRaises(ValueError):
+            client.anchor("0x" + "11" * 32, "https://example.com")
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,8 +9,9 @@ from web3 import Web3
 from eth_account import Account
 
 DEFAULT_ARBITRUM_SEPOLIA_RPC = "https://sepolia-rollup.arbitrum.io/rpc"
+DEFAULT_EXPLORER_URL = "https://sepolia.arbiscan.io"
 
-# Updated ABI matching FiberRegistry.sol (anchorEvidence, verifyEvidence)
+# ABI for FiberRegistry contract matching anchorEvidence and verifyEvidence
 FIBER_REGISTRY_ABI = [
     {
         "inputs": [
@@ -67,11 +68,16 @@ FIBER_REGISTRY_ABI = [
     }
 ]
 
-class ArbitrumFiberClient:
-    def __init__(self, rpc_url: Optional[str] = None, private_key: Optional[str] = None, contract_address: Optional[str] = None):
+class BlockchainClient:
+    def __init__(
+        self,
+        rpc_url: Optional[str] = None,
+        private_key: Optional[str] = None,
+        contract_address: Optional[str] = None
+    ):
         self.rpc_url = rpc_url or os.getenv("ARBITRUM_SEPOLIA_RPC", DEFAULT_ARBITRUM_SEPOLIA_RPC)
         self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
-        
+
         self.private_key = private_key or os.getenv("PRIVATE_KEY")
         if self.private_key and self.private_key != "0x0000000000000000000000000000000000000000000000000000000000000000":
             self.account = Account.from_key(self.private_key)
@@ -93,18 +99,27 @@ class ArbitrumFiberClient:
         """Get network Chain ID (Arbitrum Sepolia is 421614)."""
         return self.w3.eth.chain_id
 
-    def anchor_evidence(self, evidence_hash: bytes, source_url: str) -> Dict[str, Any]:
+    def anchor(self, evidence_hash_hex: str, source_url: str) -> Dict[str, Any]:
         """
-        Send transaction to anchor evidence on Arbitrum Sepolia.
+        Build, sign, and broadcast anchorEvidence transaction to Arbitrum Sepolia.
+        Waits for transaction receipt and returns receipt details & Arbiscan link.
+
+        :param evidence_hash_hex: Hex string of evidence hash (with or without '0x')
+        :param source_url: Source URL or metadata URI string
+        :return: Dict containing tx_hash, block_number, explorer_url
         """
         if not self.account or not self.contract:
-            raise ValueError("Private key and valid contract address are required for on-chain transactions.")
+            raise ValueError("PRIVATE_KEY and valid CONTRACT_ADDRESS are required to send on-chain transactions.")
+
+        # Clean hex string into 32 bytes
+        clean_hex = evidence_hash_hex.replace("0x", "")
+        evidence_bytes32 = bytes.fromhex(clean_hex)
 
         nonce = self.w3.eth.get_transaction_count(self.account.address)
         gas_price = self.w3.eth.gas_price
 
         tx = self.contract.functions.anchorEvidence(
-            evidence_hash,
+            evidence_bytes32,
             source_url
         ).build_transaction({
             'chainId': self.get_chain_id(),
@@ -114,31 +129,59 @@ class ArbitrumFiberClient:
             'from': self.account.address
         })
 
+        # Sign transaction
         signed_tx = self.w3.eth.account.sign_transaction(tx, private_key=self.private_key)
-        tx_hash = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
-        
+
+        # Broadcast transaction
+        tx_hash_bytes = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        tx_hash_hex = tx_hash_bytes.hex()
+        if not tx_hash_hex.startswith("0x"):
+            tx_hash_hex = "0x" + tx_hash_hex
+
+        # Wait for block confirmation receipt
+        receipt = self.w3.eth.wait_for_transaction_receipt(tx_hash_bytes, timeout=120)
+        receipt_tx_hash = receipt.transactionHash.hex()
+        if not receipt_tx_hash.startswith("0x"):
+            receipt_tx_hash = "0x" + receipt_tx_hash
+
+        explorer_url = f"{DEFAULT_EXPLORER_URL}/tx/{receipt_tx_hash}"
+
         return {
-            "status": "submitted",
-            "tx_hash": tx_hash.hex(),
-            "from": self.account.address
+            "tx_hash": receipt_tx_hash,
+            "block_number": receipt.blockNumber,
+            "explorer_url": explorer_url,
+            "gas_used": receipt.gasUsed,
+            "status": receipt.status
         }
 
-    def verify_evidence(self, evidence_hash: bytes) -> Dict[str, Any]:
+    def verify(self, evidence_hash_hex: str) -> Dict[str, Any]:
         """
-        Query evidence record from FiberRegistry contract.
+        Call contract's verifyEvidence view function to check on-chain status.
+
+        :param evidence_hash_hex: Hex string of evidence hash
+        :return: Dict containing exists flag and decoded record data
         """
         if not self.contract:
-            raise ValueError("Valid contract address is required to query state.")
+            raise ValueError("Valid CONTRACT_ADDRESS is required to query on-chain state.")
 
-        exists, record = self.contract.functions.verifyEvidence(evidence_hash).call()
+        clean_hex = evidence_hash_hex.replace("0x", "")
+        evidence_bytes32 = bytes.fromhex(clean_hex)
+
+        exists, record = self.contract.functions.verifyEvidence(evidence_bytes32).call()
+
+        rec_hash = record[0].hex() if isinstance(record[0], bytes) else record[0]
+        if rec_hash and not rec_hash.startswith("0x"):
+            rec_hash = "0x" + rec_hash
+
         return {
             "exists": exists,
-            "evidence_hash": record[0].hex() if isinstance(record[0], bytes) else record[0],
+            "evidence_hash": rec_hash,
             "source_url": record[1],
             "timestamp": record[2],
-            "registered_by": record[3]
+            "registered_by": record[3],
+            "contract_address": self.contract_address,
+            "explorer_url": f"{DEFAULT_EXPLORER_URL}/address/{self.contract_address}"
         }
 
-    # Aliases for backward compatibility
-    register_record_onchain = anchor_evidence
-    fetch_record = verify_evidence
+# Alias for backward compatibility
+ArbitrumFiberClient = BlockchainClient
