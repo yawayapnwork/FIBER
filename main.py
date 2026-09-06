@@ -55,11 +55,11 @@ def parse_social_info(url: str, title: str) -> str:
 
     return f"Platform: [bold yellow]{platform}[/bold yellow] | Title: {title}\nURL: [blue link={url}]{url}[/blue link]"
 
-def run_scan_pipeline(image_path: str):
+def run_scan_pipeline(image_path: str, strict_search: bool = False):
     """
     Run full 5-step enforcement pipeline with Rich terminal UI and exit codes.
     - Exit 0: Success (match and anchor verified)
-    - Exit 1: Detection failure (no valid human face found)
+    - Exit 1: Detection failure or search failure (in strict search mode)
     - Exit 2: Chain revert / Web3 transaction failure
     """
     print_banner()
@@ -85,7 +85,16 @@ def run_scan_pipeline(image_path: str):
         try:
             search_engine = CopyseekerSearchEngine()
             search_res = search_engine.search(crop_output_path)
-        except NoMatchesFoundError:
+        except NoMatchesFoundError as e:
+            if strict_search:
+                console.print(f"[bold red][X] Step 2 Search Disconnect / Zero Matches:[/bold red] {e}")
+                console.print(
+                    "[bold yellow]Remediation Guidance:[/bold yellow] "
+                    "1. Check RAPIDAPI_KEY validity in .env.\n"
+                    "2. Ensure the facial subject is indexed on public social platforms (X/Twitter, Reddit, Instagram).\n"
+                    "3. Run without --strict-search to allow direct local evidence URI fallback."
+                )
+                sys.exit(1)
             console.print("[bold yellow][!] Step 2 Warning:[/bold yellow] No web/social matches found. Using direct evidence URI.")
             search_res = {
                 "source_url": f"https://fiber.enforcement/records/{os.path.basename(image_path)}",
@@ -93,7 +102,11 @@ def run_scan_pipeline(image_path: str):
                 "matched_image_url": f"file://{os.path.abspath(crop_output_path)}",
                 "discovered_at": int(datetime.datetime.now(datetime.timezone.utc).timestamp())
             }
-        except CopyseekerTimeoutError:
+        except CopyseekerTimeoutError as e:
+            if strict_search:
+                console.print(f"[bold red][X] Step 2 Search Disconnect / Timeout:[/bold red] {e}")
+                console.print("[bold yellow]Remediation Guidance:[/bold yellow] Verify internet connection and RapidAPI service status.")
+                sys.exit(1)
             console.print("[bold yellow][!] Step 2 Timeout:[/bold yellow] RapidAPI search timed out. Falling back to local evidence record.")
             search_res = {
                 "source_url": f"https://fiber.enforcement/records/{os.path.basename(image_path)}",
@@ -102,6 +115,10 @@ def run_scan_pipeline(image_path: str):
                 "discovered_at": int(datetime.datetime.now(datetime.timezone.utc).timestamp())
             }
         except (CopyseekerRateLimitError, CopyseekerAPIError) as e:
+            if strict_search:
+                console.print(f"[bold red][X] Step 2 API Error:[/bold red] {e}")
+                console.print("[bold yellow]Remediation Guidance:[/bold yellow] Verify RAPIDAPI_KEY subscription or rate limits.")
+                sys.exit(1)
             console.print(f"[bold yellow][!] Step 2 API Warning ({e}):[/bold yellow] Falling back to local evidence URI.")
             search_res = {
                 "source_url": f"https://fiber.enforcement/records/{os.path.basename(image_path)}",
@@ -231,10 +248,12 @@ def main():
     )
     parser.add_argument("--scan", type=str, help="Run 5-step enforcement pipeline on target image")
     parser.add_argument("--verify", type=str, help="Verify existing evidence hash on Arbitrum Sepolia")
+    parser.add_argument("--strict-search", action="store_true", help="Fail pipeline if visual search returns zero matches")
 
     subparsers = parser.add_subparsers(dest="command", help="Subcommands")
     scan_sub = subparsers.add_parser("scan", help="Run 5-step enforcement pipeline on target image")
     scan_sub.add_argument("image_path", type=str, help="Path to input image file")
+    scan_sub.add_argument("--strict-search", action="store_true", help="Fail pipeline if visual search returns zero matches")
 
     verify_sub = subparsers.add_parser("verify", help="Verify existing evidence hash on Arbitrum Sepolia")
     verify_sub.add_argument("evidence_hash", type=str, help="Bytes32 hex evidence hash")
@@ -242,11 +261,11 @@ def main():
     args = parser.parse_args()
 
     if args.scan:
-        run_scan_pipeline(args.scan)
+        run_scan_pipeline(args.scan, strict_search=args.strict_search)
     elif args.verify:
         run_verify_command(args.verify)
     elif args.command == "scan":
-        run_scan_pipeline(args.image_path)
+        run_scan_pipeline(args.image_path, strict_search=args.strict_search)
     elif args.command == "verify":
         run_verify_command(args.evidence_hash)
     else:

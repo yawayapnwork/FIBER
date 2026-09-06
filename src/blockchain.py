@@ -112,6 +112,15 @@ class BlockchainClient:
         if not self.account or not self.contract:
             raise ValueError("PRIVATE_KEY and valid CONTRACT_ADDRESS are required to send on-chain transactions.")
 
+        # 0. Check account ETH balance
+        balance = self.w3.eth.get_balance(self.account.address)
+        if balance == 0:
+            raise ValueError(
+                "Insufficient testnet ETH balance (0 ETH). "
+                "Please acquire Arbitrum Sepolia testnet ETH from the faucet: "
+                "https://faucet.quicknode.com/arbitrum/sepolia"
+            )
+
         # Clean hex string into 32 bytes
         clean_hex = evidence_hash_hex.replace("0x", "")
         evidence_bytes32 = bytes.fromhex(clean_hex)
@@ -124,7 +133,16 @@ class BlockchainClient:
                 evidence_bytes32, source_url
             ).estimate_gas({'from': self.account.address})
             gas_limit = int(estimated_gas * 1.25)
-        except Exception:
+        except Exception as e:
+            err_str = str(e).lower()
+            if "already registered" in err_str:
+                raise RuntimeError(f"EVM Revert: Evidence already registered on-chain ({evidence_hash_hex})") from e
+            if "insufficient funds" in err_str:
+                raise ValueError(
+                    "Insufficient testnet ETH balance for gas. "
+                    "Please acquire Arbitrum Sepolia testnet ETH from the faucet: "
+                    "https://faucet.quicknode.com/arbitrum/sepolia"
+                ) from e
             gas_limit = 350000
 
         try:
@@ -147,7 +165,20 @@ class BlockchainClient:
         signed_tx = self.w3.eth.account.sign_transaction(tx, private_key=self.private_key)
 
         # Broadcast transaction
-        tx_hash_bytes = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        try:
+            tx_hash_bytes = self.w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        except Exception as e:
+            err_str = str(e).lower()
+            if "insufficient funds" in err_str:
+                raise ValueError(
+                    "Insufficient testnet ETH balance for gas. "
+                    "Please acquire Arbitrum Sepolia testnet ETH from the faucet: "
+                    "https://faucet.quicknode.com/arbitrum/sepolia"
+                ) from e
+            if "already registered" in err_str:
+                raise RuntimeError(f"EVM Revert: Evidence already registered on-chain ({evidence_hash_hex})") from e
+            raise e
+
         tx_hash_hex = tx_hash_bytes.hex()
         if not tx_hash_hex.startswith("0x"):
             tx_hash_hex = "0x" + tx_hash_hex
