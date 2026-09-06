@@ -40,3 +40,6 @@ crops/
 output/
 *.jpg
 *.png
+audit_logs/
+*.pt
+*.onnx
