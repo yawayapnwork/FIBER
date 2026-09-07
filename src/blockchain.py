@@ -8,6 +8,7 @@ from typing import Any
 
 from eth_account import Account
 from web3 import Web3
+from src.rpc_gateway import RPCGateway
 
 DEFAULT_ARBITRUM_SEPOLIA_RPC = "https://sepolia-rollup.arbitrum.io/rpc"
 DEFAULT_EXPLORER_URL = "https://sepolia.arbiscan.io"
@@ -56,7 +57,7 @@ class BlockchainClient:
         contract_address: str | None = None
     ):
         self.rpc_url = rpc_url or os.getenv("ARBITRUM_SEPOLIA_RPC", DEFAULT_ARBITRUM_SEPOLIA_RPC)
-        self.w3 = Web3(Web3.HTTPProvider(self.rpc_url))
+        self.w3 = RPCGateway(custom_rpc=rpc_url)
 
         self.private_key = private_key or os.getenv("PRIVATE_KEY")
         if self.private_key and self.private_key != "0x0000000000000000000000000000000000000000000000000000000000000000":
