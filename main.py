@@ -34,6 +34,7 @@ from src.blockchain import BlockchainClient
 from src.merkle import EvidenceMerkleTree
 from src.crypto import FiberCrypto
 from src.liveness import verify_liveness
+from src.relayer import execute_meta_tx
 import torchvision.transforms.functional as TF
 from PIL import ImageOps
 
@@ -70,7 +71,7 @@ def parse_author(url: str, title: str) -> str:
     """Extract author or title for metadata"""
     return title
 
-def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url: str | None = None):
+def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url: str = None, is_gasless: bool = False):
     """
     Run full 6-step enforcement pipeline with Rich terminal UI.
     Supports bypass of indexing latency via manual_url.
@@ -235,18 +236,43 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
 
     with console.status("[bold green]Step 5/6: Anchoring Merkle Root to FiberMerkleRegistry on Arbitrum Sepolia...", spinner="dots2"):
         try:
-            anchor_res = client.anchor(merkle_root, search_res["source_url"], bypass_flag=bool(manual_url))
+            if is_gasless:
+                user_key = os.getenv("PRIVATE_KEY")
+                relayer_key = os.getenv("RELAYER_PRIVATE_KEY")
+                forwarder = os.getenv("FORWARDER_ADDRESS")
+                
+                if not relayer_key or not forwarder:
+                    raise ValueError("RELAYER_PRIVATE_KEY and FORWARDER_ADDRESS must be set in .env for gasless meta-transactions")
+                if not user_key:
+                    raise ValueError("PRIVATE_KEY is required to sign the zero-gas payload")
+                    
+                target = client.contract_address
+                encoded_data = client.encode_anchor_payload(merkle_root, search_res["source_url"], bypass_flag=bool(manual_url))
+                
+                console.print("\n[dim]Signing zero-gas payload (EIP-712) & delegating to Sponsor Relayer...[/dim]")
+                tx_hash = execute_meta_tx(
+                    client, forwarder, target, encoded_data, user_key, relayer_key
+                )
+                
+                anchor_res = {
+                    "tx_hash": tx_hash,
+                    "block_number": "Mined (Relayer)",
+                    "explorer_url": f"https://sepolia.arbiscan.io/tx/{tx_hash}",
+                    "gas_used": "0 (Paid by Sponsor)"
+                }
+            else:
+                anchor_res = client.anchor(merkle_root, search_res["source_url"], bypass_flag=bool(manual_url))
         except ValueError as e:
             console.print(f"[bold red][X] Step 5 Configuration Error:[/bold red] {e}")
             sys.exit(2)
         except RuntimeError as e:
-            console.print(f"[bold red][X] Step 5 Chain Revert Error:[/bold red] {e}")
+            console.print(f"[bold red][X] Step 5 Chain Error:[/bold red] {e}")
             sys.exit(2)
         except Exception as e:
             console.print(f"[bold red][X] Step 5 Transaction Error:[/bold red] {e}")
             sys.exit(2)
 
-    console.print(f"[bold green][+] Step 5 Complete:[/bold green] Transaction mined in Block [cyan]#{anchor_res['block_number']}[/cyan]")
+    console.print(f"[bold green][+] Step 5 Complete:[/bold green] Transaction anchored. Block: [cyan]{anchor_res['block_number']}[/cyan] | Gas: [yellow]{anchor_res.get('gas_used', 'N/A')}[/yellow]")
 
     # STEP 6: Immediate Validation & Display
     with console.status("[bold green]Step 6/6: Verifying On-Chain Persisted State...", spinner="clock"):
@@ -347,6 +373,7 @@ def main():
     scan_sub = subparsers.add_parser("scan", help="Run 6-step enforcement pipeline on target image")
     scan_sub.add_argument("image_path", type=str, help="Path to input image file")
     scan_sub.add_argument("--manual-url", type=str, help="Bypass search and directly verify a post URL", default=None)
+    scan_sub.add_argument("--gasless", action="store_true", help="Execute transaction via relayer using EIP-2771 forwarder")
     
     verify_sub = subparsers.add_parser("verify", help="Verify existing Merkle Root on Arbitrum Sepolia")
     verify_sub.add_argument("merkle_root", type=str, help="Bytes32 hex Merkle Root")
@@ -357,7 +384,7 @@ def main():
     args = parser.parse_args()
 
     if args.command == "scan":
-        run_scan_pipeline(args.image_path, is_tamper_test=False, manual_url=args.manual_url)
+        run_scan_pipeline(args.image_path, is_tamper_test=False, manual_url=args.manual_url, is_gasless=args.gasless)
     elif args.command == "verify":
         run_verify_command(args.merkle_root)
     elif args.command == "tamper-test":

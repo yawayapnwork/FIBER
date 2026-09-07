@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/metatx/ERC2771Context.sol";
+
 /**
  * @title FiberMerkleRegistry
  * @dev Registry for F.I.B.E.R. storing 3-leaf Merkle Tree evidence commitments on Arbitrum Sepolia
  */
-contract FiberMerkleRegistry {
+contract FiberMerkleRegistry is ERC2771Context {
+    constructor(address trustedForwarder) ERC2771Context(trustedForwarder) {}
     // Custom errors for gas optimization
     error RootAlreadyAnchored(bytes32 _merkleRoot);
     error InvalidMerkleRoot();
@@ -50,11 +53,11 @@ contract FiberMerkleRegistry {
             merkleRoot: _merkleRoot,
             sourceUrl: _sourceUrl,
             timestamp: block.timestamp,
-            registrar: msg.sender,
+            registrar: _msgSender(),
             indexingDelayBypass: _bypass
         });
 
-        emit MerkleRootAnchored(_merkleRoot, _sourceUrl, block.timestamp, msg.sender, _bypass);
+        emit MerkleRootAnchored(_merkleRoot, _sourceUrl, block.timestamp, _msgSender(), _bypass);
     }
 
     /**

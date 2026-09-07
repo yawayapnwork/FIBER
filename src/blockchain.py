@@ -184,6 +184,20 @@ class BlockchainClient:
             "status": receipt.status
         }
 
+    def encode_anchor_payload(self, merkle_root_hex: str, source_url: str, bypass_flag: bool = False) -> bytes:
+        """
+        Build the raw ABI-encoded data payload for the anchorRoot function,
+        for use with meta-transactions.
+        """
+        if not self.contract:
+            raise ValueError("Valid CONTRACT_ADDRESS is required to encode contract calls.")
+            
+        clean_hex = merkle_root_hex.replace("0x", "")
+        merkle_bytes32 = bytes.fromhex(clean_hex)
+        
+        data_hex = self.contract.encode_abi("anchorRoot", args=[merkle_bytes32, source_url, bypass_flag])
+        return bytes.fromhex(data_hex.replace("0x", ""))
+
     def verify(self, merkle_root_hex: str) -> dict[str, Any]:
         """
         Call contract's verifyRoot view function to check on-chain status.
