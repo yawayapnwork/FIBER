@@ -370,6 +370,47 @@ def run_verify_command(merkle_root: str):
         sys.exit(2)
 
 
+def run_visual_audit(original_img_path: str, candidate_img_path: str):
+    """
+    Run the Visual Auditor tool on two images.
+    """
+    from src.visual_auditor import generate_tamper_delta
+    
+    console.print(f"\n[bold cyan]F.I.B.E.R. Visual Auditor[/bold cyan]")
+    console.print(f"Original:  [dim]{original_img_path}[/dim]")
+    console.print(f"Candidate: [dim]{candidate_img_path}[/dim]\n")
+    
+    with console.status("[bold green]Calculating Euclidean pixel distances and rendering delta mask...", spinner="dots2"):
+        delta_path = os.path.join(os.getcwd(), "audit_logs", "tamper_delta.png")
+        try:
+            res = generate_tamper_delta(original_img_path, candidate_img_path, delta_path)
+        except Exception as e:
+            console.print(f"[bold red][X] Auditor Error:[/bold red] {e}")
+            sys.exit(1)
+            
+    # Render Terminal Telemetry utilizing Rich UI components
+    table = Table(title="Visual Audit Results", box=box.ROUNDED, header_style="bold magenta")
+    table.add_column("Metric", style="bold cyan", width=30)
+    table.add_column("Value", style="white")
+    
+    score = res["structural_parity_score"]
+    score_style = "bold green" if score >= 99.0 else "bold red"
+    
+    bbox = res["bounding_box"]
+    if bbox:
+        bbox_str = f"({bbox[0]}, {bbox[1]}) to ({bbox[2]}, {bbox[3]})"
+    else:
+        bbox_str = "None detected"
+        
+    table.add_row("Structural Parity Score (%)", f"[{score_style}]{score:.4f}%[/{score_style}]")
+    table.add_row("Tamper Anomaly Coordinates", bbox_str)
+    table.add_row("Delta Evidence Saved At", f"[dim]{res['delta_path']}[/dim]")
+    
+    console.print(table)
+    if score < 99.0:
+        console.print("[bold red][!] Warning: Significant visual tampering detected.[/bold red]")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="F.I.B.E.R. - Facial Identification & Blockchain Enforcement Runtime"
@@ -387,6 +428,10 @@ def main():
 
     tamper_sub = subparsers.add_parser("tamper-test", help="Demonstrate zero-trust immutability via payload mutation")
     tamper_sub.add_argument("image_path", type=str, help="Path to input image file")
+    
+    audit_sub = subparsers.add_parser("audit", help="Run cryptographic visual auditor on two images")
+    audit_sub.add_argument("original", type=str, help="Path to original image")
+    audit_sub.add_argument("candidate", type=str, help="Path to candidate image")
 
     args = parser.parse_args()
 
@@ -396,6 +441,8 @@ def main():
         run_verify_command(args.merkle_root)
     elif args.command == "tamper-test":
         run_scan_pipeline(args.image_path, is_tamper_test=True)
+    elif args.command == "audit":
+        run_visual_audit(args.original, args.candidate)
     else:
         parser.print_help()
         sys.exit(1)
