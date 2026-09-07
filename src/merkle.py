@@ -5,6 +5,7 @@ Pure Python using standard hashlib (SHA-256).
 """
 
 import hashlib
+import hmac
 import json
 from typing import Any
 
@@ -43,7 +44,8 @@ class EvidenceMerkleTree:
         cls, 
         input_vector_bytes: bytes, 
         asset_bytes: bytes, 
-        metadata: dict[str, Any]
+        metadata: dict[str, Any],
+        salt: bytes = None
     ) -> dict[str, Any]:
         """
         Builds the 3-leaf Merkle tree from raw inputs.
@@ -51,10 +53,15 @@ class EvidenceMerkleTree:
         :param input_vector_bytes: Raw bytes of the input face embedding
         :param asset_bytes: Raw bytes of the matched visual asset
         :param metadata: Dictionary containing context data (e.g. url, timestamp, author)
+        :param salt: Optional 32-byte salt for blinded commitment
         :return: Dictionary containing the 0x-prefixed merkle root and leaf hashes
         """
         # Calculate Leaves (32 bytes each)
-        leaf_a = cls._hash(input_vector_bytes)
+        if salt:
+            leaf_a = hmac.new(salt, input_vector_bytes, hashlib.sha256).digest()
+        else:
+            leaf_a = cls._hash(input_vector_bytes)
+            
         leaf_b = cls._hash(asset_bytes)
         leaf_c = cls._hash(cls._canonical_json(metadata))
 
@@ -79,7 +86,8 @@ class EvidenceMerkleTree:
         merkle_root: str, 
         input_vector_bytes: bytes, 
         asset_bytes: bytes, 
-        metadata: dict[str, Any]
+        metadata: dict[str, Any],
+        salt: bytes = None
     ) -> bool:
         """
         Verify the integrity of a provided Merkle root against raw inputs.
@@ -88,6 +96,7 @@ class EvidenceMerkleTree:
         :param input_vector_bytes: Original face embedding bytes
         :param asset_bytes: Original matched visual asset bytes
         :param metadata: Original context metadata
+        :param salt: Optional 32-byte salt if the commitment was blinded
         :return: True if the recomputed root matches the provided root, False otherwise
         """
         # Ensure comparison is case-insensitive
@@ -95,6 +104,6 @@ class EvidenceMerkleTree:
         if not merkle_root.startswith("0x"):
             merkle_root = "0x" + merkle_root
             
-        recomputed_tree = cls.build_tree(input_vector_bytes, asset_bytes, metadata)
+        recomputed_tree = cls.build_tree(input_vector_bytes, asset_bytes, metadata, salt)
         
         return recomputed_tree["merkle_root"] == merkle_root

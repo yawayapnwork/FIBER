@@ -6,6 +6,9 @@ Canonical manifest creation, SHA-256 / Keccak-256 fingerprinting, and ECDSA mess
 import hashlib
 import io
 import json
+import os
+import hmac
+import torch
 from typing import Any
 
 from eth_account import Account
@@ -45,6 +48,26 @@ class FiberCrypto:
     def generate_evidence_hash(evidence_data: dict) -> tuple[str, bytes]:
         """Wrapper for generate_evidence_hash."""
         return generate_evidence_hash(evidence_data)
+
+    @staticmethod
+    def generate_blinded_commitment(embedding_vector: torch.Tensor, user_secret: str = None) -> dict:
+        """
+        Generate a zero-knowledge blinded commitment for a facial embedding using HMAC-SHA256.
+        """
+        quantized_vector_bytes = embedding_vector.cpu().numpy().tobytes()
+        
+        if user_secret:
+            salt = hashlib.sha256(user_secret.encode('utf-8')).digest()
+        else:
+            salt = os.urandom(32)
+            
+        hmac_digest = hmac.new(salt, quantized_vector_bytes, hashlib.sha256).digest()
+        
+        return {
+            "blinded_root": "0x" + hmac_digest.hex(),
+            "blinded_bytes": hmac_digest,
+            "salt": salt
+        }
 
     @staticmethod
     def hash_image_bytes(image_bytes: bytes) -> tuple[str, bytes]:

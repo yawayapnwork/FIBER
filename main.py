@@ -101,6 +101,10 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
             
             input_tensor = extract_embedding(input_img)
             input_vector_bytes = input_tensor.cpu().numpy().tobytes()
+            
+            # Generate blinding salt for zero-knowledge match proofs
+            blind_res = FiberCrypto.generate_blinded_commitment(input_tensor)
+            blinding_salt = blind_res["salt"]
         except ValueError as e:
             console.print(f"[bold red][X] Step 1 Detection Failure:[/bold red] {e}")
             console.print("[dim]Hint: Ensure the image contains a clear front-facing human face.[/dim]")
@@ -171,8 +175,14 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
         )
         metadata.update(auth_metadata)
 
-        merkle_res = EvidenceMerkleTree.build_tree(input_vector_bytes, candidate_vector_bytes, metadata)
+        merkle_res = EvidenceMerkleTree.build_tree(input_vector_bytes, candidate_vector_bytes, metadata, salt=blinding_salt)
         merkle_root = merkle_res["merkle_root"]
+        
+        # Securely save the salt inside the local audit log
+        audit_dir = os.path.join("audit_logs", merkle_root)
+        os.makedirs(audit_dir, exist_ok=True)
+        with open(os.path.join(audit_dir, "secret.key"), "wb") as f:
+            f.write(blinding_salt)
 
     console.print(f"[bold green][+] Step 4 Complete:[/bold green] Bi-Temporal Merkle Root Generated: [cyan]{merkle_root}[/cyan]")
 
@@ -188,7 +198,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
         tampered_metadata = copy.deepcopy(metadata)
         tampered_metadata["url"] += "?tampered=true"
         
-        tampered_merkle_res = EvidenceMerkleTree.build_tree(input_vector_bytes, bytes(tampered_candidate_bytes), tampered_metadata)
+        tampered_merkle_res = EvidenceMerkleTree.build_tree(input_vector_bytes, bytes(tampered_candidate_bytes), tampered_metadata, salt=blinding_salt)
         tampered_root = tampered_merkle_res["merkle_root"]
         
         console.print(f"[bold yellow][!] Single byte mutation applied to asset payload.[/bold yellow]")
@@ -263,7 +273,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
     table.add_row("Cosine Similarity Match Score", f"{cosine_sim:.4f} / 1.0 (Threshold: 0.72)")
     table.add_row("Discovered Footprint", social_info)
     table.add_row("3-Leaf Merkle Root (Commitment)", merkle_root)
-    table.add_row("Biometric Root (Leaf A)", merkle_res["leaves"]["leaf_a"])
+    table.add_row("Biometric Root (Leaf A)", merkle_res["leaves"]["leaf_a"] + " [bold yellow](Blinded)[/bold yellow]")
     table.add_row("Visual Asset Root (Leaf B)", merkle_res["leaves"]["leaf_b"])
     table.add_row("Context Root (Leaf C)", merkle_res["leaves"]["leaf_c"])
     
