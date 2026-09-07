@@ -35,6 +35,7 @@ from src.merkle import EvidenceMerkleTree
 from src.crypto import FiberCrypto
 from src.liveness import verify_liveness
 from src.relayer import execute_meta_tx
+from src.lsh_hasher import compute_simhash
 import torchvision.transforms.functional as TF
 from PIL import ImageOps
 
@@ -102,6 +103,9 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
             
             input_tensor = extract_embedding(input_img)
             input_vector_bytes = input_tensor.cpu().numpy().tobytes()
+            
+            # Generate 64-bit Locality-Sensitive Hash (SimHash)
+            fingerprint = compute_simhash(input_tensor)
             
             # Generate blinding salt for zero-knowledge match proofs
             blind_res = FiberCrypto.generate_blinded_commitment(input_tensor)
@@ -247,7 +251,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
                     raise ValueError("PRIVATE_KEY is required to sign the zero-gas payload")
                     
                 target = client.contract_address
-                encoded_data = client.encode_anchor_payload(merkle_root, search_res["source_url"], bypass_flag=bool(manual_url))
+                encoded_data = client.encode_anchor_payload(merkle_root, search_res["source_url"], bypass_flag=bool(manual_url), biometric_fingerprint=fingerprint)
                 
                 console.print("\n[dim]Signing zero-gas payload (EIP-712) & delegating to Sponsor Relayer...[/dim]")
                 tx_hash = execute_meta_tx(
@@ -261,7 +265,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
                     "gas_used": "0 (Paid by Sponsor)"
                 }
             else:
-                anchor_res = client.anchor(merkle_root, search_res["source_url"], bypass_flag=bool(manual_url))
+                anchor_res = client.anchor(merkle_root, search_res["source_url"], bypass_flag=bool(manual_url), biometric_fingerprint=fingerprint)
         except ValueError as e:
             console.print(f"[bold red][X] Step 5 Configuration Error:[/bold red] {e}")
             sys.exit(2)
@@ -299,6 +303,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
     table.add_row("Cosine Similarity Match Score", f"{cosine_sim:.4f} / 1.0 (Threshold: 0.72)")
     table.add_row("Discovered Footprint", social_info)
     table.add_row("3-Leaf Merkle Root (Commitment)", merkle_root)
+    table.add_row("64-bit SimHash Fingerprint", str(fingerprint))
     table.add_row("Biometric Root (Leaf A)", merkle_res["leaves"]["leaf_a"] + " [bold yellow](Blinded)[/bold yellow]")
     table.add_row("Visual Asset Root (Leaf B)", merkle_res["leaves"]["leaf_b"])
     table.add_row("Context Root (Leaf C)", merkle_res["leaves"]["leaf_c"])
@@ -355,6 +360,8 @@ def run_verify_command(merkle_root: str):
         table.add_row("Block Timestamp", ts_str)
         table.add_row("Contract Address", res["contract_address"])
         table.add_row("Arbiscan Link", f"[blue link={res['explorer_url']}]{res['explorer_url']}[/blue link]")
+        if res.get("biometric_fingerprint"):
+            table.add_row("64-bit SimHash", str(res["biometric_fingerprint"]))
 
         console.print(table)
         sys.exit(0)

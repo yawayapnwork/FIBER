@@ -19,7 +19,8 @@ FIBER_MERKLE_REGISTRY_ABI = [
         "inputs": [
             {"internalType": "bytes32", "name": "_merkleRoot", "type": "bytes32"},
             {"internalType": "string", "name": "_sourceUrl", "type": "string"},
-            {"internalType": "bool", "name": "_bypass", "type": "bool"}
+            {"internalType": "bool", "name": "_bypass", "type": "bool"},
+            {"internalType": "uint64", "name": "_biometricFingerprint", "type": "uint64"}
         ],
         "name": "anchorRoot",
         "outputs": [],
@@ -37,7 +38,8 @@ FIBER_MERKLE_REGISTRY_ABI = [
                     {"internalType": "string", "name": "sourceUrl", "type": "string"},
                     {"internalType": "uint256", "name": "timestamp", "type": "uint256"},
                     {"internalType": "address", "name": "registrar", "type": "address"},
-                    {"internalType": "bool", "name": "indexingDelayBypass", "type": "bool"}
+                    {"internalType": "bool", "name": "indexingDelayBypass", "type": "bool"},
+                    {"internalType": "uint64", "name": "biometricFingerprint", "type": "uint64"}
                 ],
                 "internalType": "struct FiberMerkleRegistry.Record",
                 "name": "record",
@@ -80,7 +82,7 @@ class BlockchainClient:
         """Get network Chain ID (Arbitrum Sepolia is 421614)."""
         return self.w3.eth.chain_id
 
-    def anchor(self, merkle_root_hex: str, source_url: str, bypass_flag: bool = False) -> dict[str, Any]:
+    def anchor(self, merkle_root_hex: str, source_url: str, bypass_flag: bool = False, biometric_fingerprint: int = 0) -> dict[str, Any]:
         """
         Build, sign, and broadcast anchorRoot transaction to Arbitrum Sepolia.
         Includes dynamic gas estimation & fallback for testnet gas price spikes.
@@ -88,6 +90,7 @@ class BlockchainClient:
         :param merkle_root_hex: Hex string of Merkle root (with or without '0x')
         :param source_url: Source URL or metadata URI string
         :param bypass_flag: Flag indicating if indexing delay was manually bypassed
+        :param biometric_fingerprint: 64-bit Locality-Sensitive Hash of the face vector
         :return: Dict containing tx_hash, block_number, explorer_url
         """
         if not self.account or not self.contract:
@@ -111,7 +114,7 @@ class BlockchainClient:
         # Dynamic gas estimation with fallback buffer
         try:
             estimated_gas = self.contract.functions.anchorRoot(
-                merkle_bytes32, source_url, bypass_flag
+                merkle_bytes32, source_url, bypass_flag, biometric_fingerprint
             ).estimate_gas({'from': self.account.address})
             gas_limit = int(estimated_gas * 1.25)
         except Exception as e:
@@ -134,7 +137,8 @@ class BlockchainClient:
         tx = self.contract.functions.anchorRoot(
             merkle_bytes32,
             source_url,
-            bypass_flag
+            bypass_flag,
+            biometric_fingerprint
         ).build_transaction({
             'chainId': self.get_chain_id(),
             'gas': gas_limit,
@@ -184,7 +188,7 @@ class BlockchainClient:
             "status": receipt.status
         }
 
-    def encode_anchor_payload(self, merkle_root_hex: str, source_url: str, bypass_flag: bool = False) -> bytes:
+    def encode_anchor_payload(self, merkle_root_hex: str, source_url: str, bypass_flag: bool = False, biometric_fingerprint: int = 0) -> bytes:
         """
         Build the raw ABI-encoded data payload for the anchorRoot function,
         for use with meta-transactions.
@@ -195,7 +199,7 @@ class BlockchainClient:
         clean_hex = merkle_root_hex.replace("0x", "")
         merkle_bytes32 = bytes.fromhex(clean_hex)
         
-        data_hex = self.contract.encode_abi("anchorRoot", args=[merkle_bytes32, source_url, bypass_flag])
+        data_hex = self.contract.encode_abi("anchorRoot", args=[merkle_bytes32, source_url, bypass_flag, biometric_fingerprint])
         return bytes.fromhex(data_hex.replace("0x", ""))
 
     def verify(self, merkle_root_hex: str) -> dict[str, Any]:
@@ -224,6 +228,7 @@ class BlockchainClient:
             "timestamp": record[2],
             "registered_by": record[3],
             "indexing_delay_bypass": record[4] if len(record) > 4 else False,
+            "biometric_fingerprint": record[5] if len(record) > 5 else 0,
             "contract_address": self.contract_address,
             "explorer_url": f"{DEFAULT_EXPLORER_URL}/address/{self.contract_address}"
         }
