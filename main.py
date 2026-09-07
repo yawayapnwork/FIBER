@@ -28,11 +28,14 @@ from rich import box
 # Load environment variables from .env
 load_dotenv()
 
-from src.matcher import extract_embedding
+from src.matcher import extract_embedding, mtcnn
 from src.search import CopyseekerSearchEngine, NoMatchesFoundError, CopyseekerAPIError, CopyseekerTimeoutError, CopyseekerRateLimitError, download_candidate_image
 from src.blockchain import BlockchainClient
 from src.merkle import EvidenceMerkleTree
 from src.crypto import FiberCrypto
+from src.liveness import verify_liveness
+import torchvision.transforms.functional as TF
+from PIL import ImageOps
 
 console = Console()
 
@@ -81,6 +84,21 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
             sys.exit(1)
         try:
             input_img = Image.open(image_path)
+            
+            # --- Liveness Detection Check ---
+            fixed_img = ImageOps.exif_transpose(input_img).convert("RGB")
+            x_aligned, prob = mtcnn(fixed_img, return_prob=True)
+            
+            if x_aligned is None or prob is None or prob < 0.85:
+                raise ValueError("No valid human face detected with confidence > 0.85")
+                
+            face_pil = TF.to_pil_image(x_aligned.byte())
+            liveness_res = verify_liveness(face_pil)
+            
+            if not liveness_res["is_live"]:
+                raise ValueError("Spoof detected: input failed passive liveness heuristics.")
+            # --------------------------------
+            
             input_tensor = extract_embedding(input_img)
             input_vector_bytes = input_tensor.cpu().numpy().tobytes()
         except ValueError as e:
