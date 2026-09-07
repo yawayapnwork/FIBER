@@ -23,7 +23,11 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.status import Status
+from rich.layout import Layout
+from rich.text import Text
 from rich import box
+import json
+import webbrowser
 
 # Load environment variables from .env
 load_dotenv()
@@ -73,18 +77,29 @@ def parse_author(url: str, title: str) -> str:
     """Extract author or title for metadata"""
     return title
 
-def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url: str = None, is_gasless: bool = False):
+def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url: str = None, is_gasless: bool = False, is_json: bool = False, open_explorer: bool = False):
     """
-    Run full 6-step enforcement pipeline with Rich terminal UI.
+    Run full 6-step enforcement pipeline with Rich terminal UI or JSON output.
     Supports bypass of indexing latency via manual_url.
     """
-    print_banner()
+    global console
+    if is_json:
+        console = Console(quiet=True)
+        
+    def error_exit(msg: str, code: int = 1):
+        if is_json:
+            sys.stderr.write(json.dumps({"status": "error", "message": msg}) + "\n")
+        else:
+            console.print(f"[bold red][X] {msg}[/bold red]")
+        sys.exit(code)
+
+    if not is_json:
+        print_banner()
 
     # STEP 1: Face Extraction & Embedding
     with console.status("[bold green]Step 1/6: Detecting face & extracting 512-D embedding (MTCNN/InceptionResnetV1)...", spinner="dots"):
         if not os.path.exists(image_path):
-            console.print(f"[bold red][X] Step 1 Error:[/bold red] Image file not found: {image_path}")
-            sys.exit(1)
+            error_exit(f"Step 1 Error: Image file not found: {image_path}", 1)
         try:
             input_img = Image.open(image_path)
             
@@ -112,19 +127,15 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
             blind_res = FiberCrypto.generate_blinded_commitment(input_tensor)
             blinding_salt = blind_res["salt"]
         except ValueError as e:
-            console.print(f"[bold red][X] Step 1 Detection Failure:[/bold red] {e}")
-            console.print("[dim]Hint: Ensure the image contains a clear front-facing human face.[/dim]")
-            sys.exit(1)
+            if not is_json:
+                console.print("[dim]Hint: Ensure the image contains a clear front-facing human face.[/dim]")
+            error_exit(f"Step 1 Detection Failure: {e}", 1)
         except Exception as e:
-            console.print(f"[bold red][X] Image Processing Error:[/bold red] {e}")
-            sys.exit(1)
+            error_exit(f"Image Processing Error: {e}", 1)
 
     console.print(f"[bold green][+] Step 1 Complete:[/bold green] High-confidence facial embedding extracted.")
 
     # STEP 2: Reverse Visual Search
-    if manual_url:
-        console.print(f"[bold yellow][!] Step 2 Bypassed:[/bold yellow] Using manual URL override due to search indexing latency.")
-        search_res = {
     with console.status("[bold green]Step 2/6: Querying Non-Google Reverse Visual Search Index...", spinner="earth"):
         try:
             if manual_url:
@@ -141,8 +152,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
             # Capture network witness metadata from target source
             witness_manifest = capture_witness_metadata(search_res["source_url"])
         except Exception as e:
-            console.print(f"[bold red][X] Step 2 Oracle Query/Witness Error:[/bold red] {e}")
-            sys.exit(2)
+            error_exit(f"Step 2 Oracle Query/Witness Error: {e}", 2)
 
     console.print(f"[bold green][+] Step 2 Complete:[/bold green] Found reverse match at [cyan]{search_res['source_url']}[/cyan]")
     console.print(f"    [dim]TLS Witness Root:[/dim] [magenta]{witness_manifest.get('tlsWitnessRoot')}[/magenta]")
@@ -160,12 +170,10 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
             
             cosine_sim = F.cosine_similarity(input_tensor, candidate_tensor).item()
         except Exception as e:
-            console.print(f"[bold red][X] Step 3 Verification Failure:[/bold red] Failed to process candidate image: {e}")
-            sys.exit(1)
+            error_exit(f"Step 3 Verification Failure: Failed to process candidate image: {e}", 1)
             
         if cosine_sim < 0.72:
-            console.print(f"[bold red][X] Step 3 Verification Rejected:[/bold red] Cosine Similarity ({cosine_sim:.4f}) below threshold (0.72).")
-            sys.exit(1)
+            error_exit(f"Step 3 Verification Rejected: Cosine Similarity ({cosine_sim:.4f}) below threshold (0.72).", 1)
 
     console.print(f"[bold green][+] Step 3 Complete:[/bold green] Identity cryptographically verified. Similarity Score: [cyan]{cosine_sim:.4f}[/cyan] (>= 0.72)")
 
@@ -220,8 +228,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
         
         client = BlockchainClient()
         if not client.is_connected():
-            console.print(f"[bold red][X] RPC Connection Error[/bold red]")
-            sys.exit(2)
+            error_exit("RPC Connection Error", 2)
             
         try:
             res = client.verify(tampered_root)
@@ -234,17 +241,14 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
                 ))
                 sys.exit(0)
             else:
-                console.print("[bold red][X] TAMPER TEST FAILED: Tampered root somehow exists on-chain![/bold red]")
-                sys.exit(1)
+                error_exit("TAMPER TEST FAILED: Tampered root somehow exists on-chain!", 1)
         except Exception as e:
-            console.print(f"[bold red][X] Verification Query Error:[/bold red] {e}")
-            sys.exit(2)
+            error_exit(f"Verification Query Error: {e}", 2)
 
     # STEP 5: Blockchain Anchoring (Only in normal scan mode)
     client = BlockchainClient()
     if not client.is_connected():
-        console.print(f"[bold red][X] Step 5 RPC Connection Error:[/bold red] Cannot connect to Arbitrum Sepolia RPC.")
-        sys.exit(2)
+        error_exit("Step 5 RPC Connection Error: Cannot connect to Arbitrum Sepolia RPC.", 2)
 
     with console.status("[bold green]Step 5/6: Anchoring Merkle Root to FiberMerkleRegistry on Arbitrum Sepolia...", spinner="dots2"):
         try:
@@ -275,14 +279,11 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
             else:
                 anchor_res = client.anchor(merkle_root, search_res["source_url"], bypass_flag=bool(manual_url), biometric_fingerprint=fingerprint)
         except ValueError as e:
-            console.print(f"[bold red][X] Step 5 Configuration Error:[/bold red] {e}")
-            sys.exit(2)
+            error_exit(f"Step 5 Configuration Error: {e}", 2)
         except RuntimeError as e:
-            console.print(f"[bold red][X] Step 5 Chain Error:[/bold red] {e}")
-            sys.exit(2)
+            error_exit(f"Step 5 Chain Error: {e}", 2)
         except Exception as e:
-            console.print(f"[bold red][X] Step 5 Transaction Error:[/bold red] {e}")
-            sys.exit(2)
+            error_exit(f"Step 5 Transaction Error: {e}", 2)
 
     console.print(f"[bold green][+] Step 5 Complete:[/bold green] Transaction anchored. Block: [cyan]{anchor_res['block_number']}[/cyan] | Gas: [yellow]{anchor_res.get('gas_used', 'N/A')}[/yellow]")
 
@@ -291,46 +292,83 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
         try:
             verify_res = client.verify(merkle_root)
         except Exception as e:
-            console.print(f"[bold red][X] Step 6 Verification Query Failed:[/bold red] {e}")
-            sys.exit(2)
+            error_exit(f"Step 6 Verification Query Failed: {e}", 2)
 
     if not verify_res["exists"]:
-        console.print("[bold red][X] Step 6 Validation Error: Merkle root not found on-chain.[/bold red]")
-        sys.exit(2)
+        error_exit("Step 6 Validation Error: Merkle root not found on-chain.", 2)
 
     console.print(f"[bold green][+] Step 6 Complete:[/bold green] On-Chain State Confirmed!")
 
-    # OUTPUT CLEAN SUMMARY TABLE
+    # JSON OUTPUT MODE
+    if is_json:
+        output_payload = {
+            "status": "success",
+            "merkle_root": merkle_root,
+            "cosine_similarity": cosine_sim,
+            "simhash": fingerprint,
+            "biometric_root": merkle_res["leaves"]["leaf_a"],
+            "asset_root": merkle_res["leaves"]["leaf_b"],
+            "context_root": merkle_res["leaves"]["leaf_c"],
+            "source_url": search_res["source_url"],
+            "author": author,
+            "tx_hash": anchor_res.get("tx_hash"),
+            "block_number": anchor_res.get("block_number"),
+            "explorer_url": anchor_res.get("explorer_url")
+        }
+        print(json.dumps(output_payload, indent=2))
+        if open_explorer and anchor_res.get("explorer_url"):
+            webbrowser.open_new_tab(anchor_res["explorer_url"])
+        sys.exit(0)
+
+    # RICH DASHBOARD OUTPUT
     console.print("\n")
-    table = Table(title="F.I.B.E.R. Immutable Evidence Receipt", box=box.ROUNDED, header_style="bold magenta")
-    table.add_column("Property", style="bold cyan", width=35)
-    table.add_column("Details / On-Chain State", style="white")
+    
+    # 1. LiveMetricsPanel
+    metrics_text = Text()
+    metrics_text.append("Model Provider: ", style="bold cyan")
+    metrics_text.append("PyTorch MTCNN + InceptionResnetV1 (ResNet50)\n", style="white")
+    metrics_text.append("Detected Face Res: ", style="bold cyan")
+    metrics_text.append(f"{input_img.size[0]}x{input_img.size[1]}\n", style="white")
+    metrics_text.append("Cosine Metric Gauge: ", style="bold cyan")
+    metrics_text.append(f"{cosine_sim:.4f} / 1.0 (Threshold: 0.72)", style="bold green" if cosine_sim >= 0.72 else "bold red")
+    metrics_panel = Panel(metrics_text, title="Live AI Metrics", border_style="cyan")
 
+    # 2. EvidenceAuditTable
+    audit_table = Table(box=box.SIMPLE_HEAD, expand=True)
+    audit_table.add_column("Property", style="bold magenta")
+    audit_table.add_column("State", style="white")
+    
     social_info = parse_social_info(search_res["source_url"], search_res["page_title"])
+    audit_table.add_row("Discovered Footprint", social_info)
+    audit_table.add_row("64-bit SimHash", str(fingerprint))
+    if witness_manifest.get('tlsWitnessRoot'):
+        audit_table.add_row("TLS Witness Root", witness_manifest['tlsWitnessRoot'])
+    audit_table.add_row("3-Leaf Merkle Root", merkle_root)
+    audit_panel = Panel(audit_table, title="Cryptographic Evidence Audit", border_style="magenta")
 
-    table.add_row("Cosine Similarity Match Score", f"{cosine_sim:.4f} / 1.0 (Threshold: 0.72)")
-    table.add_row("Discovered Footprint", social_info)
-    table.add_row("3-Leaf Merkle Root (Commitment)", merkle_root)
-    table.add_row("64-bit SimHash Fingerprint", str(fingerprint))
-    table.add_row("Biometric Root (Leaf A)", merkle_res["leaves"]["leaf_a"] + " [bold yellow](Blinded)[/bold yellow]")
-    table.add_row("Visual Asset Root (Leaf B)", merkle_res["leaves"]["leaf_b"])
-    table.add_row("Context Root (Leaf C)", merkle_res["leaves"]["leaf_c"])
+    # 3. BlockchainReceiptBanner
+    receipt_text = Text()
+    receipt_text.append("Arbitrum Sepolia Block: ", style="bold cyan")
+    receipt_text.append(f"#{anchor_res['block_number']}\n", style="white")
+    receipt_text.append("Gas Consumed: ", style="bold cyan")
+    receipt_text.append(f"{anchor_res.get('gas_used', 'N/A')}\n", style="white")
+    receipt_text.append("Arbiscan URL: ", style="bold cyan")
+    receipt_text.append(f"{anchor_res['explorer_url']}", style="blue link=" + anchor_res['explorer_url'])
+    receipt_panel = Panel(receipt_text, title="On-Chain Anchor Receipt", border_style="green")
     
-    if metadata.get("access_scope") == "WALLED_RESTRICTED":
-        table.add_row("Access Scope", "[bold red]WALLED_RESTRICTED (OpenGraph Fallback)[/bold red]")
-        table.add_row("Auth Wall Hash (Proof)", f"[dim]{metadata.get('auth_wall_hash')}...[/dim]")
+    layout = Layout()
+    layout.split_column(
+        Layout(metrics_panel, size=6),
+        Layout(audit_panel, size=10),
+        Layout(receipt_panel, size=6)
+    )
     
-    table.add_row("Indexing Lag (Seconds)", str(metadata["indexing_lag_seconds"]))
-    
-    if verify_res.get("indexing_delay_bypass"):
-        table.add_row("Indexing Delay Bypass", "[bold yellow]TRUE (Manual Verification)[/bold yellow]")
-        
-    table.add_row("Arbitrum Tx Hash", f"{anchor_res['tx_hash']} (Block #{anchor_res['block_number']})")
-    table.add_row("Arbiscan Explorer Link", f"[blue link={anchor_res['explorer_url']}]{anchor_res['explorer_url']}[/blue link]")
-    table.add_row("Registered By (Registrar)", verify_res["registered_by"])
-
-    console.print(table)
+    console.print(layout)
     console.print(Panel("[bold green]ENFORCEMENT PIPELINE COMPLETED SUCCESSFULLY (Exit Code 0)[/bold green]", border_style="green", expand=False))
+    
+    if open_explorer and anchor_res.get("explorer_url"):
+        webbrowser.open_new_tab(anchor_res["explorer_url"])
+        
     sys.exit(0)
 
 
@@ -430,6 +468,8 @@ def main():
     scan_sub.add_argument("image_path", type=str, help="Path to input image file")
     scan_sub.add_argument("--manual-url", type=str, help="Bypass search and directly verify a post URL", default=None)
     scan_sub.add_argument("--gasless", action="store_true", help="Execute transaction via relayer using EIP-2771 forwarder")
+    scan_sub.add_argument("--json", action="store_true", help="Output pure JSON machine-readable string instead of Rich UI")
+    scan_sub.add_argument("--open-explorer", action="store_true", help="Open Arbiscan receipt in browser upon completion")
     
     verify_sub = subparsers.add_parser("verify", help="Verify existing Merkle Root on Arbitrum Sepolia")
     verify_sub.add_argument("merkle_root", type=str, help="Bytes32 hex Merkle Root")
@@ -444,7 +484,14 @@ def main():
     args = parser.parse_args()
 
     if args.command == "scan":
-        run_scan_pipeline(args.image_path, is_tamper_test=False, manual_url=args.manual_url, is_gasless=args.gasless)
+        run_scan_pipeline(
+            args.image_path, 
+            is_tamper_test=False, 
+            manual_url=args.manual_url, 
+            is_gasless=args.gasless,
+            is_json=args.json,
+            open_explorer=args.open_explorer
+        )
     elif args.command == "verify":
         run_verify_command(args.merkle_root)
     elif args.command == "tamper-test":
