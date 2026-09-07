@@ -36,6 +36,7 @@ from src.crypto import FiberCrypto
 from src.liveness import verify_liveness
 from src.relayer import execute_meta_tx
 from src.lsh_hasher import compute_simhash
+from src.tls_witness import capture_witness_metadata
 import torchvision.transforms.functional as TF
 from PIL import ImageOps
 
@@ -124,23 +125,29 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
     if manual_url:
         console.print(f"[bold yellow][!] Step 2 Bypassed:[/bold yellow] Using manual URL override due to search indexing latency.")
         search_res = {
-            "source_url": manual_url,
-            "page_title": "Manual Override Post",
-            "matched_image_url": manual_url,
-            "discovered_at": int(time.time())
-        }
-    else:
-        with console.status("[bold green]Step 2/6: Querying Non-Google Reverse Visual Search Index...", spinner="earth"):
-            try:
+    with console.status("[bold green]Step 2/6: Querying Non-Google Reverse Visual Search Index...", spinner="earth"):
+        try:
+            if manual_url:
+                search_res = {
+                    "source_url": manual_url,
+                    "page_title": "Manual Verification Override",
+                    "matched_image_url": manual_url,
+                    "discovered_at": int(time.time())
+                }
+            else:
                 search_engine = CopyseekerSearchEngine()
                 search_res = search_engine.search(image_path)
-            except NoMatchesFoundError as e:
-                console.print(f"[bold red][X] Step 2 Zero Matches:[/bold red] {e}")
-                sys.exit(1)
-            except Exception as e:
-                console.print(f"[bold red][X] Step 2 API Error:[/bold red] {e}")
-                sys.exit(1)
-        console.print(f"[bold green][+] Step 2 Complete:[/bold green] Visual match discovered: [blue link={search_res['source_url']}]{search_res['source_url']}[/blue link]")
+                
+            # Capture network witness metadata from target source
+            witness_manifest = capture_witness_metadata(search_res["source_url"])
+        except Exception as e:
+            console.print(f"[bold red][X] Step 2 Oracle Query/Witness Error:[/bold red] {e}")
+            sys.exit(2)
+
+    console.print(f"[bold green][+] Step 2 Complete:[/bold green] Found reverse match at [cyan]{search_res['source_url']}[/cyan]")
+    console.print(f"    [dim]TLS Witness Root:[/dim] [magenta]{witness_manifest.get('tlsWitnessRoot')}[/magenta]")
+    if witness_manifest.get("cert_sha256"):
+        console.print(f"    [dim]Remote Cert SHA256:[/dim] {witness_manifest['cert_sha256'][:32]}...")
 
     # STEP 3: Bidirectional Face Verification
     with console.status("[bold green]Step 3/6: Running Bidirectional Face Verification (Cosine Similarity)...", spinner="bouncingBar"):
@@ -178,6 +185,7 @@ def run_scan_pipeline(image_path: str, is_tamper_test: bool = False, manual_url:
             discovered_at=search_res["discovered_at"],
             published_at=published_at
         )
+        metadata["tls_witness"] = witness_manifest
         metadata.update(auth_metadata)
 
         merkle_res = EvidenceMerkleTree.build_tree(input_vector_bytes, candidate_vector_bytes, metadata, salt=blinding_salt)
